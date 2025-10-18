@@ -45,7 +45,7 @@ func (s *AuthService) RegisterUser(ctx context.Context, nombre, apellido, email 
 
 	// Insertar usuario
 	_, err = s.db.Exec(ctx,
-		`INSERT INTO tb_persona (nombre, apellido, email, contrasena, fecha_registro, id_rol)
+		`INSERT INTO tb_persona (nombre, apellido, email, contraseña, fecha_registro, id_rol)
 		 VALUES ($1, $2, $3, $4, CURRENT_DATE, $5)`,
 		nombre, apellido, email, string(hashedPassword), idRolUsuario,
 	)
@@ -75,7 +75,7 @@ func (s *AuthService) LoginUser(ctx context.Context, email, password string) (in
 	var hashedPassword string
 
 	err := s.db.QueryRow(ctx,
-		"SELECT id_persona, nombre, contrasena FROM tb_persona WHERE email = $1",
+		"SELECT id_persona, nombre, contraseña FROM tb_persona WHERE email = $1",
 		email,
 	).Scan(&idPersona, &nombre, &hashedPassword)
 
