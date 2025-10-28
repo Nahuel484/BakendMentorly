@@ -41,8 +41,9 @@ func main() {
 
 	fmt.Println("✓ Conexión a base de datos exitosa")
 
-	// Inicializar Handler
-	handler := handlers.NewHandler(pool)
+	// Inicializar Handlers
+	authHandler := handlers.NewHandler(pool)
+	oauthHandler := handlers.NewOAuthHandler(pool)
 
 	// Inicializar Gin
 	router := gin.Default()
@@ -62,16 +63,26 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	// Rutas públicas
-	router.POST("/auth/register", handler.RegisterHandler)
-	router.POST("/auth/login", handler.LoginHandler)
+	// Rutas públicas - Autenticación tradicional
+	router.POST("/auth/register", authHandler.RegisterHandler)
+	router.POST("/auth/login", authHandler.LoginHandler)
+
+	// Rutas de OAuth - URLs de autenticación
+	router.GET("/auth/google/url", oauthHandler.GetGoogleAuthURL)
+	router.GET("/auth/github/url", oauthHandler.GetGitHubAuthURL)
+	router.GET("/auth/linkedin/url", oauthHandler.GetLinkedInAuthURL)
+
+	// Callbacks de OAuth
+	router.GET("/auth/google/callback", oauthHandler.GoogleCallbackHandler)
+	router.GET("/auth/github/callback", oauthHandler.GitHubCallbackHandler)
+	router.GET("/auth/linkedin/callback", oauthHandler.LinkedInCallbackHandler)
 
 	// Rutas protegidas
 	protected := router.Group("/")
 	protected.Use(handlers.AuthMiddleware())
 	{
-		protected.POST("/auth/select-role", handler.SelectRoleHandler)
-		protected.GET("/user/profile", handler.GetProfileHandler)
+		protected.POST("/auth/select-role", authHandler.SelectRoleHandler)
+		protected.GET("/user/profile", authHandler.GetProfileHandler)
 	}
 
 	fmt.Println("✓ Servidor iniciado en http://localhost:8080")
