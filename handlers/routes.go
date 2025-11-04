@@ -3,12 +3,12 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
+	"mentorly-backend/services"
 	"net/http"
 	"os"
 	"strings"
 	"time"
-
-	"mentorly-backend/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -105,6 +105,10 @@ func (h *Handler) RegisterHandler(c *gin.Context) {
 				Message: "El email ya está registrado",
 			})
 		} else {
+			// ¡¡ESTA ES LA LÍNEA MÁS IMPORTANTE!!
+			// Imprime el error real en tu terminal antes de devolver 500
+			log.Printf("💥 ERROR AL REGISTRAR (routes.go): %v", err)
+
 			c.JSON(http.StatusInternalServerError, ResponseData{
 				Success: false,
 				Message: "Error al crear usuario",
