@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -223,13 +224,14 @@ func ExchangeLinkedInCode(code string) (*OAuthUserInfo, error) {
 	clientSecret := os.Getenv("LINKEDIN_CLIENT_SECRET")
 	redirectURL := os.Getenv("LINKEDIN_REDIRECT_URL")
 
+	// Intercambiar código por token
 	tokenURL := "https://www.linkedin.com/oauth/v2/accessToken"
 	data := url.Values{}
 	data.Set("grant_type", "authorization_code")
 	data.Set("code", code)
+	data.Set("redirect_uri", redirectURL)
 	data.Set("client_id", clientID)
 	data.Set("client_secret", clientSecret)
-	data.Set("redirect_uri", redirectURL)
 
 	resp, err := http.PostForm(tokenURL, data)
 	if err != nil {
@@ -237,15 +239,20 @@ func ExchangeLinkedInCode(code string) (*OAuthUserInfo, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("linkedin token error (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
 	var tokenResp LinkedInTokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
 		return nil, fmt.Errorf("error al decodificar token de LinkedIn: %w", err)
 	}
 
-	// Obtener información del usuario
-	userInfoURL := "https://api.linkedin.com/v2/me?projection=(id,localizedFirstName,localizedLastName,profilePicture(displayImage))"
-	req, _ := http.NewRequest("GET", userInfoURL, nil)
-	req.Header.Add("Authorization", "Bearer "+tokenResp.AccessToken)
+	// Obtener información del usuario usando OpenID Connect
+	userURL := "https://api.linkedin.com/v2/userinfo"
+	req, _ := http.NewRequest("GET", userURL, nil)
+	req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
 
 	client := &http.Client{}
 	userResp, err := client.Do(req)
@@ -254,28 +261,34 @@ func ExchangeLinkedInCode(code string) (*OAuthUserInfo, error) {
 	}
 	defer userResp.Body.Close()
 
-	var userInfo LinkedInUserInfo
+	if userResp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(userResp.Body)
+		return nil, fmt.Errorf("linkedin userinfo error (status %d): %s", userResp.StatusCode, string(bodyBytes))
+	}
+
+	var userInfo struct {
+		Sub     string `json:"sub"`
+		Name    string `json:"name"`
+		Email   string `json:"email"`
+		Picture string `json:"picture"`
+	}
+
 	if err := json.NewDecoder(userResp.Body).Decode(&userInfo); err != nil {
 		return nil, fmt.Errorf("error al decodificar info de usuario de LinkedIn: %w", err)
 	}
 
-	// Obtener email del usuario
-	email := getLinkedInUserEmail(tokenResp.AccessToken)
-
-	fullName := strings.TrimSpace(userInfo.LocalizedFirstName + " " + userInfo.LocalizedLastName)
-
 	return &OAuthUserInfo{
-		ID:       userInfo.ID,
-		Email:    email,
-		Name:     fullName,
-		Avatar:   userInfo.ProfilePicture.DisplayImage,
+		ID:       userInfo.Sub,
+		Email:    userInfo.Email,
+		Name:     userInfo.Name,
+		Avatar:   userInfo.Picture,
 		Provider: LinkedInProvider,
 	}, nil
 }
 
 // getLinkedInUserEmail obtiene el email del usuario de LinkedIn
 func getLinkedInUserEmail(accessToken string) string {
-	emailURL := "https://api.linkedin.com/v2/emailAddress?q=primary&projection=(elements*(handle~))"
+	emailURL := "https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))"
 	req, _ := http.NewRequest("GET", emailURL, nil)
 	req.Header.Add("Authorization", "Bearer "+accessToken)
 
@@ -286,13 +299,20 @@ func getLinkedInUserEmail(accessToken string) string {
 	}
 	defer resp.Body.Close()
 
-	var emailResp LinkedInEmailResponse
+	var emailResp struct {
+		Elements []struct {
+			Handle struct {
+				EmailAddress string `json:"emailAddress"`
+			} `json:"handle~"`
+		} `json:"elements"`
+	}
+
 	if err := json.NewDecoder(resp.Body).Decode(&emailResp); err != nil {
 		return ""
 	}
 
 	if len(emailResp.Elements) > 0 {
-		return emailResp.Elements[0].Handle
+		return emailResp.Elements[0].Handle.EmailAddress
 	}
 
 	return ""
