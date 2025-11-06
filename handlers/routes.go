@@ -21,6 +21,7 @@ type Handler struct {
 	roleService *services.RoleService
 }
 
+// RegisterRequest - Estructura para registro con campos en minúsculas
 type RegisterRequest struct {
 	Nombre     string `json:"nombre" binding:"required,min=2"`
 	Apellido   string `json:"apellido" binding:"required,min=2"`

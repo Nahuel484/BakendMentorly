@@ -71,6 +71,17 @@ func (h *OAuthHandler) GitHubCallbackHandler(c *gin.Context) {
 // LinkedInCallbackHandler maneja el callback de LinkedIn OAuth
 func (h *OAuthHandler) LinkedInCallbackHandler(c *gin.Context) {
 	code := c.Query("code")
+	errorParam := c.Query("error")
+	errorDesc := c.Query("error_description")
+	
+	if errorParam != "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("LinkedIn error: %s - %s", errorParam, errorDesc),
+		})
+		return
+	}
+	
 	if code == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -158,7 +169,7 @@ func (h *OAuthHandler) GetLinkedInAuthURL(c *gin.Context) {
 	redirectURL := os.Getenv("LINKEDIN_REDIRECT_URL")
 
 	authURL := fmt.Sprintf(
-		"https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=%s&redirect_uri=%s&scope=profile+openid+email",
+		"https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=%s&redirect_uri=%s&scope=openid%%20profile%%20email",
 		clientID, redirectURL,
 	)
 
