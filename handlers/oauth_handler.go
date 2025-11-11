@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"mentorly-backend/services"
 	"net/http"
@@ -71,6 +73,17 @@ func (h *OAuthHandler) GitHubCallbackHandler(c *gin.Context) {
 // LinkedInCallbackHandler maneja el callback de LinkedIn OAuth
 func (h *OAuthHandler) LinkedInCallbackHandler(c *gin.Context) {
 	code := c.Query("code")
+	errorParam := c.Query("error")
+	errorDesc := c.Query("error_description")
+
+	if errorParam != "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("LinkedIn error: %s - %s", errorParam, errorDesc),
+		})
+		return
+	}
+
 	if code == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -93,37 +106,58 @@ func (h *OAuthHandler) LinkedInCallbackHandler(c *gin.Context) {
 
 // handleOAuthLogin gestiona el login/registro con OAuth
 func (h *OAuthHandler) handleOAuthLogin(c *gin.Context, oauthUser *services.OAuthUserInfo) {
-	// Buscar o crear usuario con el proveedor OAuth
-	user, err := h.authService.FindOrCreateOAuthUser(c.Request.Context(), oauthUser)
+	// 1) Login/registro
+	idPersona, nombre, err := h.authService.LoginUser(c.Request.Context(), oauthUser.Email, "")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": fmt.Sprintf("Error processing user: %v", err),
-		})
+		if errors.Is(err, services.ErrInvalidCredentials) {
+			idPersona, err = h.authService.RegisterUser(context.Background(), oauthUser.Name, "", oauthUser.Email, "")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al registrar usuario con OAuth"})
+				return
+			}
+			nombre = oauthUser.Name
+		} else {
+			c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al procesar usuario con OAuth"})
+			return
+		}
+	}
+
+	// Generar token JWT
+	// 2) Generar tu JWT local
+	token, err := GenerateToken(idPersona, oauthUser.Email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": fmt.Sprintf("Error generating token: %v", err)})
 		return
 	}
 
-	// Generar token JWT (usando int como ID)
-	idPersona := int(user.ID)
-	token, err := GenerateToken(idPersona, user.Email)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": fmt.Sprintf("Error generating token: %v", err),
-		})
-		return
+	// 3) Guardarlo en cookie HttpOnly y redirigir al front
+	frontendURL := os.Getenv("FRONTEND_URL") // ej: http://localhost:5173
+	if frontendURL == "" {
+		frontendURL = "http://localhost:5173" // fallback en dev
 	}
+	c.SetCookie(
+		"auth_token",
+		token,
+		60*60*24*7, // 7 días
+		"/",
+		"",    // domain (vacío = host del backend)
+		false, // secure (poné true en https)
+		true,  // httpOnly
+	)
+
+	c.Redirect(http.StatusFound, fmt.Sprintf("%s/role", frontendURL))
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Login successful",
-		"data": gin.H{
-			"token":      token,
-			"id_persona": idPersona,
-			"email":      user.Email,
-			"nombre":     user.Name,
+		"data": TokenResponse{
+			Token:     token,
+			IDPersona: idPersona,
+			Email:     oauthUser.Email,
+			Nombre:    nombre,
 		},
 	})
+
 }
 
 // GetGoogleAuthURL retorna la URL de autenticación de Google
@@ -158,7 +192,7 @@ func (h *OAuthHandler) GetLinkedInAuthURL(c *gin.Context) {
 	redirectURL := os.Getenv("LINKEDIN_REDIRECT_URL")
 
 	authURL := fmt.Sprintf(
-		"https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=%s&redirect_uri=%s&scope=profile+openid+email",
+		"https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=%s&redirect_uri=%s&scope=openid%%20profile%%20email",
 		clientID, redirectURL,
 	)
 

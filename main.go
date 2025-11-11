@@ -27,6 +27,11 @@ func main() {
 		log.Fatal("Error: DATABASE_URL no está configurada")
 	}
 
+	// Verificar que el secreto del JWT esté configurado
+	if os.Getenv("JWT_SECRET") == "" {
+		log.Fatal("Error: JWT_SECRET no está configurada")
+	}
+
 	pool, err := pgxpool.New(context.Background(), databaseURL)
 	if err != nil {
 		log.Fatalf("Error al crear pool de conexiones: %v", err)
@@ -40,6 +45,16 @@ func main() {
 	}
 
 	fmt.Println("✓ Conexión a base de datos exitosa")
+
+	// --- BLOQUE TEMPORAL PARA GENERAR HASH ---
+	// Descomenta las siguientes líneas para generar un nuevo hash de contraseña
+	//tempAuthService := services.NewAuthService(pool)
+	//newHash, _ := tempAuthService.HashPassword("password123")
+	//fmt.Println("========================================")
+	//fmt.Println("NUEVO HASH PARA 'password123':")
+	//fmt.Println(newHash)
+	//fmt.Println("========================================")
+	// --- FIN DEL BLOQUE TEMPORAL ---
 
 	// Inicializar Handlers
 	authHandler := handlers.NewHandler(pool)
@@ -68,9 +83,9 @@ func main() {
 	router.POST("/auth/login", authHandler.LoginHandler)
 
 	// Rutas de OAuth - URLs de autenticación
-	router.GET("/auth/google/url", oauthHandler.GetGoogleAuthURL)
-	router.GET("/auth/github/url", oauthHandler.GetGitHubAuthURL)
-	router.GET("/auth/linkedin/url", oauthHandler.GetLinkedInAuthURL)
+	router.GET("/oauth/google/url", oauthHandler.GetGoogleAuthURL)
+	router.GET("/oauth/github/url", oauthHandler.GetGitHubAuthURL)
+	router.GET("/oauth/linkedin/url", oauthHandler.GetLinkedInAuthURL)
 
 	// Callbacks de OAuth
 	router.GET("/auth/google/callback", oauthHandler.GoogleCallbackHandler)
@@ -78,11 +93,24 @@ func main() {
 	router.GET("/auth/linkedin/callback", oauthHandler.LinkedInCallbackHandler)
 
 	// Rutas protegidas
-	protected := router.Group("/")
-	protected.Use(handlers.AuthMiddleware())
+	userRoutes := router.Group("/")
+	userRoutes.Use(handlers.AuthMiddleware())
 	{
-		protected.POST("/auth/select-role", authHandler.SelectRoleHandler)
-		protected.GET("/user/profile", authHandler.GetProfileHandler)
+		userRoutes.POST("/auth/select-role", authHandler.SelectRoleHandler)
+		userRoutes.GET("/user/profile", authHandler.GetProfileHandler)
+		userRoutes.PUT("/user/profile", authHandler.UpdateProfileHandler)
+		userRoutes.POST("/auth/subscribe/:plan_id", authHandler.SubscribeToPlanHandler)
+	}
+
+	// Rutas de administración (protegidas por rol de admin)
+	admin := router.Group("/")
+	admin.Use(handlers.AuthMiddleware(), authHandler.AdminMiddleware())
+	{
+		admin.POST("/plans", authHandler.CreatePlanHandler)
+		admin.GET("/plans", authHandler.GetAllPlansHandler)
+		admin.GET("/plans/:id", authHandler.GetPlanByIDHandler)
+		admin.PUT("/plans/:id", authHandler.UpdatePlanHandler)
+		admin.DELETE("/plans/:id", authHandler.DeletePlanHandler)
 	}
 
 	fmt.Println("✓ Servidor iniciado en http://localhost:8080")
