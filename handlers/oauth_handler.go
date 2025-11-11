@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"mentorly-backend/services"
 	"net/http"
@@ -73,7 +75,7 @@ func (h *OAuthHandler) LinkedInCallbackHandler(c *gin.Context) {
 	code := c.Query("code")
 	errorParam := c.Query("error")
 	errorDesc := c.Query("error_description")
-	
+
 	if errorParam != "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -81,7 +83,7 @@ func (h *OAuthHandler) LinkedInCallbackHandler(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	if code == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -104,19 +106,26 @@ func (h *OAuthHandler) LinkedInCallbackHandler(c *gin.Context) {
 
 // handleOAuthLogin gestiona el login/registro con OAuth
 func (h *OAuthHandler) handleOAuthLogin(c *gin.Context, oauthUser *services.OAuthUserInfo) {
-	// Buscar o crear usuario con el proveedor OAuth
-	user, err := h.authService.FindOrCreateOAuthUser(c.Request.Context(), oauthUser)
+	// Intentar loguear al usuario por email. Si no existe, lo registra sin contraseña.
+	idPersona, nombre, err := h.authService.LoginUser(c.Request.Context(), oauthUser.Email, "")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": fmt.Sprintf("Error processing user: %v", err),
-		})
-		return
+		// Si el usuario no existe, lo registramos
+		if errors.Is(err, services.ErrInvalidCredentials) { // Reutilizamos este error para "no encontrado"
+			// El registro con OAuth no necesita contraseña, pasamos un hash vacío.
+			idPersona, err = h.authService.RegisterUser(context.Background(), oauthUser.Name, "", oauthUser.Email, "")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al registrar usuario con OAuth"})
+				return
+			}
+			nombre = oauthUser.Name
+		} else {
+			c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al procesar usuario con OAuth"})
+			return
+		}
 	}
 
-	// Generar token JWT (usando int como ID)
-	idPersona := int(user.ID)
-	token, err := GenerateToken(idPersona, user.Email)
+	// Generar token JWT
+	token, err := GenerateToken(idPersona, oauthUser.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -128,11 +137,11 @@ func (h *OAuthHandler) handleOAuthLogin(c *gin.Context, oauthUser *services.OAut
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Login successful",
-		"data": gin.H{
-			"token":      token,
-			"id_persona": idPersona,
-			"email":      user.Email,
-			"nombre":     user.Name,
+		"data": TokenResponse{
+			Token:     token,
+			IDPersona: idPersona,
+			Email:     oauthUser.Email,
+			Nombre:    nombre,
 		},
 	})
 }

@@ -1,1 +1,12 @@
+# Archivo de variables de entorno
 .env
+
+# Binarios compilados
+# Reemplaza 'mentorly-backend' si tu ejecutable tiene otro nombre
+mentorly-backend
+mentorly-backend.exe
+
+# Archivos de configuración de IDEs y editores
+.vscode/
+.idea/
+*.DS_Store

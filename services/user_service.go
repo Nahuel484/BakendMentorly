@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -30,13 +32,13 @@ func (s *UserService) GetUserProfile(ctx context.Context, idPersona int) (*UserP
 	var idRol int
 
 	err := s.db.QueryRow(ctx,
-		"SELECT id_persona, nombre, apellido, email, id_rol FROM tb_persona WHERE id_persona = $1",
+		"SELECT id_persona, nombre, apellido, email, id_rol FROM tb_persona WHERE id_persona = $1", // Sin cambios, ya era correcto
 		idPersona,
 	).Scan(&idPersona, &nombre, &apellido, &email, &idRol)
 
 	if err != nil {
 		log.Printf("Error al obtener perfil de usuario: %v", err)
-		return nil, ErrUserNotFound
+		return nil, ErrUserNotFound // Corregido: Devolver el error correcto
 	}
 
 	// Mapear el rol
@@ -56,7 +58,7 @@ func (s *UserService) GetUserProfile(ctx context.Context, idPersona int) (*UserP
 func (s *UserService) GetRoleNameByID(ctx context.Context, idRol int) string {
 	var nombreRol string
 	err := s.db.QueryRow(ctx,
-		"SELECT nombre_rol FROM tb_rol WHERE id_rol = $1",
+		"SELECT nombre_rol FROM tb_rol WHERE id_rol = $1", // Corregido: tb_rol
 		idRol,
 	).Scan(&nombreRol)
 
@@ -82,11 +84,43 @@ func (s *UserService) UpdateUserRole(ctx context.Context, idPersona int, idRol i
 	return nil
 }
 
+// UpdateUserProfile actualiza los campos del perfil de un usuario.
+// Solo actualiza los campos que no son cadenas vacías.
+func (s *UserService) UpdateUserProfile(ctx context.Context, idPersona int, nombre, apellido string) error {
+	var setClauses []string
+	var args []interface{}
+	argID := 1
+
+	if nombre != "" {
+		setClauses = append(setClauses, fmt.Sprintf("nombre = $%d", argID))
+		args = append(args, nombre)
+		argID++
+	}
+	if apellido != "" {
+		setClauses = append(setClauses, fmt.Sprintf("apellido = $%d", argID))
+		args = append(args, apellido)
+		argID++
+	}
+
+	// Si no hay campos para actualizar, no hacer nada.
+	if len(setClauses) == 0 {
+		return nil
+	}
+
+	// Construir la consulta final
+	query := fmt.Sprintf("UPDATE tb_persona SET %s WHERE id_persona = $%d", strings.Join(setClauses, ", "), argID)
+	args = append(args, idPersona)
+
+	// Ejecutar la consulta
+	_, err := s.db.Exec(ctx, query, args...)
+	return err
+}
+
 // GetRoleIDByName obtiene el ID del rol por su nombre
 func (s *UserService) GetRoleIDByName(ctx context.Context, nombreRol string) (int, error) {
 	var idRol int
 	err := s.db.QueryRow(ctx,
-		"SELECT id_rol FROM tb_rol WHERE nombre_rol = $1",
+		"SELECT id_rol FROM tb_rol WHERE nombre_rol = $1", // Corregido: tb_rol
 		nombreRol,
 	).Scan(&idRol)
 

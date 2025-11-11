@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,18 +12,6 @@ import (
 // AuthService maneja la autenticación
 type AuthService struct {
 	db *pgxpool.Pool
-}
-
-// User estructura para autenticación tradicional y OAuth
-type User struct {
-	ID        int64
-	Email     string
-	Name      string
-	Avatar    string
-	Provider  string
-	OAuthID   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
 }
 
 // NewAuthService crea una nueva instancia del servicio de autenticación
@@ -85,6 +72,11 @@ func (s *AuthService) LoginUser(ctx context.Context, email string, password stri
 		return 0, "", err
 	}
 
+	// Si el password está vacío (login OAuth), y el hash también, es un login válido.
+	if password == "" && hashedPassword == "" {
+		return idPersona, nombre, nil
+	}
+
 	// Verificar contraseña
 	err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	if err != nil {
@@ -101,72 +93,4 @@ func (s *AuthService) HashPassword(password string) (string, error) {
 		return "", err
 	}
 	return string(hashedPassword), nil
-}
-
-// ============================================
-// MÉTODOS PARA OAUTH
-// ============================================
-
-// FindOrCreateOAuthUser busca un usuario existente o crea uno nuevo con OAuth
-func (s *AuthService) FindOrCreateOAuthUser(ctx context.Context, oauthUser *OAuthUserInfo) (*User, error) {
-	// Primero intentar buscar por email en tabla users
-	user, err := s.GetUserByEmail(ctx, oauthUser.Email)
-	if err == nil {
-		// Usuario existe, actualizar proveedor si es necesario
-		err = s.updateOAuthProvider(ctx, user.ID, oauthUser)
-		if err != nil {
-			return nil, fmt.Errorf("error updating oauth provider: %w", err)
-		}
-		return user, nil
-	}
-
-	// Si no existe, crear nuevo usuario en tabla users
-	newUser := &User{
-		Email:    oauthUser.Email,
-		Name:     oauthUser.Name,
-		Avatar:   oauthUser.Avatar,
-		Provider: string(oauthUser.Provider),
-		OAuthID:  oauthUser.ID,
-	}
-
-	err = s.db.QueryRow(ctx,
-		`INSERT INTO users (email, name, avatar, provider, oauth_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 RETURNING id, email, name, avatar, provider, oauth_id, created_at, updated_at`,
-		newUser.Email, newUser.Name, newUser.Avatar, newUser.Provider, newUser.OAuthID, time.Now(), time.Now(),
-	).Scan(&newUser.ID, &newUser.Email, &newUser.Name, &newUser.Avatar, &newUser.Provider, &newUser.OAuthID, &newUser.CreatedAt, &newUser.UpdatedAt)
-
-	if err != nil {
-		return nil, fmt.Errorf("error creating oauth user: %w", err)
-	}
-
-	return newUser, nil
-}
-
-// updateOAuthProvider actualiza el proveedor OAuth de un usuario existente
-func (s *AuthService) updateOAuthProvider(ctx context.Context, userID int64, oauthUser *OAuthUserInfo) error {
-	_, err := s.db.Exec(ctx,
-		`UPDATE users SET provider = $1, oauth_id = $2, avatar = COALESCE($3, avatar), updated_at = $4
-		 WHERE id = $5`,
-		string(oauthUser.Provider), oauthUser.ID, oauthUser.Avatar, time.Now(), userID,
-	)
-	return err
-}
-
-// GetUserByEmail obtiene un usuario por email de la tabla users
-func (s *AuthService) GetUserByEmail(ctx context.Context, email string) (*User, error) {
-	user := &User{}
-	err := s.db.QueryRow(ctx,
-		`SELECT id, email, name, avatar, provider, oauth_id, created_at, updated_at FROM users WHERE email = $1`,
-		email,
-	).Scan(&user.ID, &user.Email, &user.Name, &user.Avatar, &user.Provider, &user.OAuthID, &user.CreatedAt, &user.UpdatedAt)
-
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("user not found")
-	}
-	if err != nil {
-		return nil, fmt.Errorf("error fetching user: %w", err)
-	}
-
-	return user, nil
 }

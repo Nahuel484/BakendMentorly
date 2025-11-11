@@ -27,6 +27,11 @@ func main() {
 		log.Fatal("Error: DATABASE_URL no está configurada")
 	}
 
+	// Verificar que el secreto del JWT esté configurado
+	if os.Getenv("JWT_SECRET") == "" {
+		log.Fatal("Error: JWT_SECRET no está configurada")
+	}
+
 	pool, err := pgxpool.New(context.Background(), databaseURL)
 	if err != nil {
 		log.Fatalf("Error al crear pool de conexiones: %v", err)
@@ -40,6 +45,16 @@ func main() {
 	}
 
 	fmt.Println("✓ Conexión a base de datos exitosa")
+
+	// --- BLOQUE TEMPORAL PARA GENERAR HASH ---
+	// Descomenta las siguientes líneas para generar un nuevo hash de contraseña
+	//tempAuthService := services.NewAuthService(pool)
+	//newHash, _ := tempAuthService.HashPassword("password123")
+	//fmt.Println("========================================")
+	//fmt.Println("NUEVO HASH PARA 'password123':")
+	//fmt.Println(newHash)
+	//fmt.Println("========================================")
+	// --- FIN DEL BLOQUE TEMPORAL ---
 
 	// Inicializar Handlers
 	authHandler := handlers.NewHandler(pool)
@@ -63,26 +78,41 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
+	api := router.Group("/api")
+
 	// Rutas públicas - Autenticación tradicional
-	router.POST("/auth/register", authHandler.RegisterHandler)
-	router.POST("/auth/login", authHandler.LoginHandler)
+	api.POST("/auth/register", authHandler.RegisterHandler)
+	api.POST("/auth/login", authHandler.LoginHandler)
 
 	// Rutas de OAuth - URLs de autenticación
-	router.GET("/auth/google/url", oauthHandler.GetGoogleAuthURL)
-	router.GET("/auth/github/url", oauthHandler.GetGitHubAuthURL)
-	router.GET("/auth/linkedin/url", oauthHandler.GetLinkedInAuthURL)
+	api.GET("/auth/google/url", oauthHandler.GetGoogleAuthURL)
+	api.GET("/auth/github/url", oauthHandler.GetGitHubAuthURL)
+	api.GET("/auth/linkedin/url", oauthHandler.GetLinkedInAuthURL)
 
 	// Callbacks de OAuth
-	router.GET("/auth/google/callback", oauthHandler.GoogleCallbackHandler)
-	router.GET("/auth/github/callback", oauthHandler.GitHubCallbackHandler)
-	router.GET("/auth/linkedin/callback", oauthHandler.LinkedInCallbackHandler)
+	api.GET("/auth/google/callback", oauthHandler.GoogleCallbackHandler)
+	api.GET("/auth/github/callback", oauthHandler.GitHubCallbackHandler)
+	api.GET("/auth/linkedin/callback", oauthHandler.LinkedInCallbackHandler)
 
 	// Rutas protegidas
-	protected := router.Group("/")
-	protected.Use(handlers.AuthMiddleware())
+	userRoutes := api.Group("/user")
+	userRoutes.Use(handlers.AuthMiddleware())
 	{
-		protected.POST("/auth/select-role", authHandler.SelectRoleHandler)
-		protected.GET("/user/profile", authHandler.GetProfileHandler)
+		userRoutes.POST("/select-role", authHandler.SelectRoleHandler)
+		userRoutes.GET("/profile", authHandler.GetProfileHandler)
+		userRoutes.PUT("/profile", authHandler.UpdateProfileHandler)
+		userRoutes.POST("/subscribe/:plan_id", authHandler.SubscribeToPlanHandler)
+	}
+
+	// Rutas de administración (protegidas por rol de admin)
+	admin := api.Group("/admin")
+	admin.Use(handlers.AuthMiddleware(), authHandler.AdminMiddleware())
+	{
+		admin.POST("/plans", authHandler.CreatePlanHandler)
+		admin.GET("/plans", authHandler.GetAllPlansHandler)
+		admin.GET("/plans/:id", authHandler.GetPlanByIDHandler)
+		admin.PUT("/plans/:id", authHandler.UpdatePlanHandler)
+		admin.DELETE("/plans/:id", authHandler.DeletePlanHandler)
 	}
 
 	fmt.Println("✓ Servidor iniciado en http://localhost:8080")

@@ -2,23 +2,23 @@ package handlers
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"os"
-	"strings"
-	"time"
-
+	"errors"
+	"mentorly-backend/models"
 	"mentorly-backend/services"
+	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Handler struct {
-	authService *services.AuthService
-	userService *services.UserService
-	roleService *services.RoleService
+	authService         *services.AuthService
+	userService         *services.UserService
+	roleService         *services.RoleService
+	planService         *services.PlanService
+	subscriptionService *services.SubscriptionService
 }
 
 // RegisterRequest - Estructura para registro con campos en minúsculas
@@ -39,30 +39,19 @@ type SelectRoleRequest struct {
 	Rol string `json:"rol" binding:"required"`
 }
 
-type ResponseData struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
-}
-
-type TokenResponse struct {
-	Token     string `json:"token"`
-	IDPersona int    `json:"id_persona"`
-	Email     string `json:"email"`
-	Nombre    string `json:"nombre"`
-}
-
-type Claims struct {
-	IDPersona int    `json:"id_persona"`
-	Email     string `json:"email"`
-	jwt.RegisteredClaims
+type UpdateProfileRequest struct {
+	// omitempty permite que los campos no se envíen si no se quieren modificar
+	Nombre   string `json:"nombre" binding:"omitempty,min=2"`
+	Apellido string `json:"apellido" binding:"omitempty,min=2"`
 }
 
 func NewHandler(db *pgxpool.Pool) *Handler {
 	return &Handler{
-		authService: services.NewAuthService(db),
-		userService: services.NewUserService(db),
-		roleService: services.NewRoleService(db),
+		authService:         services.NewAuthService(db),
+		userService:         services.NewUserService(db),
+		roleService:         services.NewRoleService(db),
+		planService:         services.NewPlanService(db),
+		subscriptionService: services.NewSubscriptionService(db),
 	}
 }
 
@@ -100,7 +89,7 @@ func (h *Handler) RegisterHandler(c *gin.Context) {
 	// Registrar usuario
 	idPersona, err := h.authService.RegisterUser(context.Background(), req.Nombre, req.Apellido, req.Email, hashedPassword)
 	if err != nil {
-		if err == services.ErrEmailAlreadyExists {
+		if errors.Is(err, services.ErrEmailAlreadyExists) {
 			c.JSON(http.StatusConflict, ResponseData{
 				Success: false,
 				Message: "El email ya está registrado",
@@ -283,6 +272,188 @@ func (h *Handler) GetProfileHandler(c *gin.Context) {
 	})
 }
 
+// UpdateProfileHandler - Actualizar el perfil del usuario
+func (h *Handler) UpdateProfileHandler(c *gin.Context) {
+	idPersonaInterface, exists := c.Get("id_persona")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ResponseData{Success: false, Message: "No autenticado"})
+		return
+	}
+	idPersona := idPersonaInterface.(int)
+
+	var req UpdateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ResponseData{Success: false, Message: "Datos inválidos: " + err.Error()})
+		return
+	}
+
+	// Si no se envía ningún dato, no hay nada que hacer.
+	if req.Nombre == "" && req.Apellido == "" {
+		c.JSON(http.StatusBadRequest, ResponseData{Success: false, Message: "No se proporcionaron datos para actualizar"})
+		return
+	}
+
+	// Llamar al servicio para actualizar el perfil
+	err := h.userService.UpdateUserProfile(context.Background(), idPersona, req.Nombre, req.Apellido)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ResponseData{
+			Success: false,
+			Message: "Error al actualizar el perfil",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, ResponseData{
+		Success: true,
+		Message: "Perfil actualizado correctamente",
+	})
+}
+
+// SubscribeToPlanHandler - Suscribe al usuario logueado a un plan
+func (h *Handler) SubscribeToPlanHandler(c *gin.Context) {
+	// 1. Obtener el ID del usuario desde el token
+	idPersonaInterface, exists := c.Get("id_persona")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ResponseData{Success: false, Message: "No autenticado"})
+		return
+	}
+	idPersona := idPersonaInterface.(int)
+
+	// 2. Obtener el ID del plan desde la URL (parámetro)
+	idPlan, err := strconv.Atoi(c.Param("plan_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ResponseData{Success: false, Message: "ID de plan inválido"})
+		return
+	}
+
+	// 3. Llamar al servicio para crear la suscripción
+	// (Aquí en el futuro podrías añadir lógica de pago con Stripe, etc.)
+	subscription, err := h.subscriptionService.CreateSubscription(context.Background(), idPersona, idPlan)
+	if err != nil {
+		c.Error(err) // Loguear el error real
+		c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al procesar la suscripción"})
+		return
+	}
+
+	// 4. Devolver una respuesta exitosa
+	c.JSON(http.StatusCreated, ResponseData{
+		Success: true,
+		Message: "Suscripción creada exitosamente",
+		Data:    subscription,
+	})
+}
+
+// Plan Handlers
+
+// CreatePlanHandler - Crea un nuevo plan
+func (h *Handler) CreatePlanHandler(c *gin.Context) {
+	var plan models.Plan
+	if err := c.ShouldBindJSON(&plan); err != nil {
+		c.JSON(http.StatusBadRequest, ResponseData{Success: false, Message: "Datos de plan inválidos: " + err.Error()})
+		return
+	}
+
+	createdPlan, err := h.planService.CreatePlan(context.Background(), plan)
+	if err != nil {
+		c.Error(err) // Añadimos el error al contexto de Gin para que se muestre en el log
+		c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al crear el plan"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, ResponseData{
+		Success: true,
+		Message: "Plan creado exitosamente",
+		Data:    createdPlan,
+	})
+}
+
+// GetAllPlansHandler - Obtiene todos los planes
+func (h *Handler) GetAllPlansHandler(c *gin.Context) {
+	plans, err := h.planService.GetAllPlans(context.Background())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al obtener los planes"})
+		return
+	}
+
+	c.JSON(http.StatusOK, ResponseData{
+		Success: true,
+		Message: "Planes obtenidos correctamente",
+		Data:    plans,
+	})
+}
+
+// GetPlanByIDHandler - Obtiene un plan por su ID
+func (h *Handler) GetPlanByIDHandler(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ResponseData{Success: false, Message: "ID de plan inválido"})
+		return
+	}
+
+	plan, err := h.planService.GetPlanByID(context.Background(), id)
+	if err != nil {
+		// Aquí sería ideal chequear si el error es pgx.ErrNoRows y devolver 404
+		c.JSON(http.StatusNotFound, ResponseData{Success: false, Message: "Plan no encontrado"})
+		return
+	}
+
+	c.JSON(http.StatusOK, ResponseData{
+		Success: true,
+		Message: "Plan obtenido correctamente",
+		Data:    plan,
+	})
+}
+
+// UpdatePlanHandler - Actualiza un plan existente
+func (h *Handler) UpdatePlanHandler(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ResponseData{Success: false, Message: "ID de plan inválido"})
+		return
+	}
+
+	var plan models.Plan
+	if err := c.ShouldBindJSON(&plan); err != nil {
+		c.JSON(http.StatusBadRequest, ResponseData{Success: false, Message: "Datos de plan inválidos: " + err.Error()})
+		return
+	}
+
+	err = h.planService.UpdatePlan(context.Background(), id, plan)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al actualizar el plan"})
+		return
+	}
+
+	c.JSON(http.StatusOK, ResponseData{
+		Success: true,
+		Message: "Plan actualizado correctamente",
+	})
+}
+
+// DeletePlanHandler - Elimina un plan
+func (h *Handler) DeletePlanHandler(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ResponseData{Success: false, Message: "ID de plan inválido"})
+		return
+	}
+
+	err = h.planService.DeletePlan(context.Background(), id)
+	if err != nil {
+		if errors.Is(err, services.ErrNotFound) {
+			c.JSON(http.StatusNotFound, ResponseData{Success: false, Message: "Plan no encontrado"})
+		} else {
+			c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al eliminar el plan"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, ResponseData{
+		Success: true,
+		Message: "Plan eliminado correctamente",
+	})
+}
+
 // AuthMiddleware - Middleware para proteger rutas
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -324,54 +495,35 @@ func AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-// JWT Functions
+// AdminMiddleware - Middleware para proteger rutas de administrador
+func (h *Handler) AdminMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idPersonaInterface, exists := c.Get("id_persona")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, ResponseData{Success: false, Message: "No autenticado"})
+			c.Abort()
+			return
+		}
+		idPersona := idPersonaInterface.(int)
 
-func GenerateToken(idPersona int, email string) (string, error) {
-	secretKey := os.Getenv("JWT_SECRET")
-	if secretKey == "" {
-		secretKey = "tu_clave_super_secreta_cambiar_en_produccion"
+		// Obtener el perfil del usuario para verificar su rol
+		profile, err := h.userService.GetUserProfile(context.Background(), idPersona)
+		if err != nil {
+			c.JSON(http.StatusForbidden, ResponseData{Success: false, Message: "Usuario no válido"})
+			c.Abort()
+			return
+		}
+
+		// Permitir que los mentores sean administradores
+		if profile.Rol != "mentor" {
+			c.JSON(http.StatusForbidden, ResponseData{
+				Success: false,
+				Message: "Acceso denegado. Se requiere rol de mentor.",
+			})
+			c.Abort()
+			return
+		}
+
+		c.Next()
 	}
-
-	expirationTime := time.Now().Add(7 * 24 * time.Hour)
-
-	claims := &Claims{
-		IDPersona: idPersona,
-		Email:     email,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expirationTime),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(secretKey))
-
-	if err != nil {
-		return "", err
-	}
-
-	return tokenString, nil
-}
-
-func VerifyToken(tokenString string) (*Claims, error) {
-	secretKey := os.Getenv("JWT_SECRET")
-	if secretKey == "" {
-		secretKey = "tu_clave_super_secreta_cambiar_en_produccion"
-	}
-
-	claims := &Claims{}
-
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		return []byte(secretKey), nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	if !token.Valid {
-		return nil, fmt.Errorf("token inválido")
-	}
-
-	return claims, nil
 }
