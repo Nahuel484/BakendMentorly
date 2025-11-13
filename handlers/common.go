@@ -59,9 +59,11 @@ func VerifyToken(tokenString string) (*Claims, error) {
 
 	claims := &Claims{}
 
+	leeway := 2 * 24 * time.Hour
+
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte(secretKey), nil
-	})
+	}, jwt.WithLeeway(leeway))
 
 	if err != nil || !token.Valid {
 		return nil, fmt.Errorf("token inválido")

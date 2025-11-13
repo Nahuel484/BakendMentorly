@@ -10,3 +10,7 @@ mentorly-backend.exe
 .vscode/
 .idea/
 *.DS_Store
+
+# Documentación y notas
+Arquitectura.txt
+Metodo HTTP.txt

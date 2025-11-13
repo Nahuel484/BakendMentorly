@@ -59,6 +59,9 @@ func main() {
 	// Inicializar Handlers
 	authHandler := handlers.NewHandler(pool)
 	oauthHandler := handlers.NewOAuthHandler(pool)
+	sessionHandler := handlers.NewSessionHandler(pool)
+	skillHandler := handlers.NewSkillHandler(pool)
+	especialidadHandler := handlers.NewEspecialidadHandler(pool)
 
 	// Inicializar Gin
 	router := gin.Default()
@@ -80,11 +83,16 @@ func main() {
 
 	api := router.Group("/api")
 
-	// Rutas públicas - Autenticación tradicional
+	// ============================================================
+	// RUTAS PÚBLICAS - AUTENTICACIÓN TRADICIONAL
+	// ============================================================
 	api.POST("/auth/register", authHandler.RegisterHandler)
 	api.POST("/auth/login", authHandler.LoginHandler)
 
-	// Rutas de OAuth - URLs de autenticación
+	// ============================================================
+	// RUTAS DE OAUTH
+	// ============================================================
+	// URLs de autenticación
 	api.GET("/auth/google/url", oauthHandler.GetGoogleAuthURL)
 	api.GET("/auth/github/url", oauthHandler.GetGitHubAuthURL)
 	api.GET("/auth/linkedin/url", oauthHandler.GetLinkedInAuthURL)
@@ -94,25 +102,75 @@ func main() {
 	api.GET("/auth/github/callback", oauthHandler.GitHubCallbackHandler)
 	api.GET("/auth/linkedin/callback", oauthHandler.LinkedInCallbackHandler)
 
-	// Rutas protegidas
+	// ============================================================
+	// RUTAS PROTEGIDAS - USUARIO
+	// ============================================================
 	userRoutes := api.Group("/user")
 	userRoutes.Use(handlers.AuthMiddleware())
 	{
-		userRoutes.POST("/select-role", authHandler.SelectRoleHandler)
+		// Perfil
 		userRoutes.GET("/profile", authHandler.GetProfileHandler)
 		userRoutes.PUT("/profile", authHandler.UpdateProfileHandler)
+
+		// Rol
+		userRoutes.POST("/select-role", authHandler.SelectRoleHandler)
+
+		// Suscripción
 		userRoutes.POST("/subscribe/:plan_id", authHandler.SubscribeToPlanHandler)
+
+		// Sesiones
+		userRoutes.POST("/logout", sessionHandler.LogoutHandler)
+		userRoutes.POST("/logout-all", sessionHandler.LogoutAllHandler)
+
+		// Habilidades del usuario
+		userRoutes.GET("/skills", skillHandler.GetUserSkillsHandler)
+		userRoutes.POST("/skills", skillHandler.AddSkillToUserHandler)
+		userRoutes.PUT("/skills/:skill_id/level", skillHandler.UpdateUserSkillLevelHandler)
+		userRoutes.DELETE("/skills/:skill_id", skillHandler.RemoveUserSkillHandler)
+
+		// Especialidades del usuario
+		userRoutes.GET("/especialidades", especialidadHandler.GetUserEspecialidadesHandler)
+		userRoutes.POST("/especialidades", especialidadHandler.AddEspecialidadToUserHandler)
+		userRoutes.DELETE("/especialidades/:especialidad_id", especialidadHandler.RemoveUserEspecialidadHandler)
 	}
 
-	// Rutas de administración (protegidas por rol de admin)
+	// ============================================================
+	// RUTAS PÚBLICAS - HABILIDADES (INFORMACIÓN)
+	// ============================================================
+	skillsPublic := api.Group("/skills")
+	{
+		skillsPublic.GET("", skillHandler.GetAllSkillsHandler)
+		skillsPublic.GET("/:id", skillHandler.GetSkillByIDHandler)
+	}
+
+	// ============================================================
+	// RUTAS PÚBLICAS - ESPECIALIDADES (INFORMACIÓN)
+	// ============================================================
+	especialidadesPublic := api.Group("/especialidades")
+	{
+		especialidadesPublic.GET("", especialidadHandler.GetAllEspecialidadesHandler)
+		especialidadesPublic.GET("/:id", especialidadHandler.GetEspecialidadByIDHandler)
+	}
+
+	// ============================================================
+	// RUTAS DE ADMINISTRACIÓN (PROTEGIDAS POR ROL)
+	// ============================================================
 	admin := api.Group("/admin")
 	admin.Use(handlers.AuthMiddleware(), authHandler.AdminMiddleware())
 	{
+		// Planes
 		admin.POST("/plans", authHandler.CreatePlanHandler)
 		admin.GET("/plans", authHandler.GetAllPlansHandler)
 		admin.GET("/plans/:id", authHandler.GetPlanByIDHandler)
 		admin.PUT("/plans/:id", authHandler.UpdatePlanHandler)
 		admin.DELETE("/plans/:id", authHandler.DeletePlanHandler)
+
+		// Habilidades (crear y gestionar)
+		admin.POST("/skills", skillHandler.CreateSkillHandler)
+
+		// Especialidades (crear y gestionar)
+		admin.POST("/especialidades", especialidadHandler.CreateEspecialidadHandler)
+		admin.DELETE("/especialidades/:id", especialidadHandler.DeleteEspecialidadHandler)
 	}
 
 	fmt.Println("✓ Servidor iniciado en http://localhost:8080")

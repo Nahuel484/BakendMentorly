@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype" // Importar pgtype
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -18,7 +19,7 @@ type UserProfile struct {
 	Nombre    string
 	Apellido  string
 	Email     string
-	IDRol     int
+	IDRol     pgtype.Int4 // Cambiado a pgtype.Int4 para manejar NULLs
 	Rol       string
 }
 
@@ -29,20 +30,25 @@ func NewUserService(db *pgxpool.Pool) *UserService {
 // GetUserProfile obtiene el perfil completo del usuario
 func (s *UserService) GetUserProfile(ctx context.Context, idPersona int) (*UserProfile, error) {
 	var nombre, apellido, email string
-	var idRol int
+	var idRol pgtype.Int4 // Usar pgtype.Int4 para manejar NULLs
 
 	err := s.db.QueryRow(ctx,
-		"SELECT id_persona, nombre, apellido, email, id_rol FROM tb_persona WHERE id_persona = $1", // Sin cambios, ya era correcto
+		"SELECT id_persona, nombre, apellido, email, id_rol FROM tb_persona WHERE id_persona = $1",
 		idPersona,
 	).Scan(&idPersona, &nombre, &apellido, &email, &idRol)
 
 	if err != nil {
 		log.Printf("Error al obtener perfil de usuario: %v", err)
-		return nil, ErrUserNotFound // Corregido: Devolver el error correcto
+		return nil, ErrUserNotFound
 	}
 
 	// Mapear el rol
-	rol := s.GetRoleNameByID(ctx, idRol)
+	var rol string
+	if idRol.Valid {
+		rol = s.GetRoleNameByID(ctx, int(idRol.Int32))
+	} else {
+		rol = "Sin rol"
+	}
 
 	return &UserProfile{
 		IDPersona: idPersona,
