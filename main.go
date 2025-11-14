@@ -46,29 +46,21 @@ func main() {
 
 	fmt.Println("✓ Conexión a base de datos exitosa")
 
-	// --- BLOQUE TEMPORAL PARA GENERAR HASH ---
-	// Descomenta las siguientes líneas para generar un nuevo hash de contraseña
-	//tempAuthService := services.NewAuthService(pool)
-	//newHash, _ := tempAuthService.HashPassword("password123")
-	//fmt.Println("========================================")
-	//fmt.Println("NUEVO HASH PARA 'password123':")
-	//fmt.Println(newHash)
-	//fmt.Println("========================================")
-	// --- FIN DEL BLOQUE TEMPORAL ---
-
 	// Inicializar Handlers
-	authHandler := handlers.NewHandler(pool)
+	authHandler := handlers.NewAuthHandler(pool)
 	oauthHandler := handlers.NewOAuthHandler(pool)
 	sessionHandler := handlers.NewSessionHandler(pool)
 	skillHandler := handlers.NewSkillHandler(pool)
 	especialidadHandler := handlers.NewEspecialidadHandler(pool)
+	notificationHandler := handlers.NewNotificationHandler(pool)
+	profileHandler := handlers.NewProfileHandler(pool)
 
 	// Inicializar Gin
 	router := gin.Default()
 
 	// Configurar CORS
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000", "https://mentorly-web.vercel.app/", "https://mentorly-web.vercel.app", "http://localhost:5174"},
+		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000", "https://mentorly-web.vercel.app", "http://localhost:5174"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -109,8 +101,8 @@ func main() {
 	userRoutes.Use(handlers.AuthMiddleware())
 	{
 		// Perfil
-		userRoutes.GET("/profile", authHandler.GetProfileHandler)
-		userRoutes.PUT("/profile", authHandler.UpdateProfileHandler)
+		userRoutes.GET("/profile", profileHandler.GetProfileHandler)    // Corregido para usar profileHandler
+		userRoutes.PUT("/profile", profileHandler.UpdateProfileHandler) // Corregido para usar profileHandler
 
 		// Rol
 		userRoutes.POST("/select-role", authHandler.SelectRoleHandler)
@@ -132,6 +124,14 @@ func main() {
 		userRoutes.GET("/especialidades", especialidadHandler.GetUserEspecialidadesHandler)
 		userRoutes.POST("/especialidades", especialidadHandler.AddEspecialidadToUserHandler)
 		userRoutes.DELETE("/especialidades/:especialidad_id", especialidadHandler.RemoveUserEspecialidadHandler)
+
+		// Notificaciones
+		userRoutes.GET("/notifications", notificationHandler.GetUserNotificationsHandler)
+		userRoutes.GET("/notifications/unread-count", notificationHandler.GetUnreadCountHandler)
+		userRoutes.POST("/notifications", notificationHandler.CreateNotificationHandler)
+		userRoutes.PUT("/notifications/:id/read", notificationHandler.MarkAsReadHandler)
+		userRoutes.PUT("/notifications/read-all", notificationHandler.MarkAllAsReadHandler)
+		userRoutes.DELETE("/notifications/:id", notificationHandler.DeleteNotificationHandler)
 	}
 
 	// ============================================================

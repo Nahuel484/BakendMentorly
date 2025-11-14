@@ -6,12 +6,12 @@ import (
 	"log"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgtype" // Importar pgtype
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type UserService struct {
-	db *pgxpool.Pool
+	db           *pgxpool.Pool
+	emailService *EmailService
 }
 
 type UserProfile struct {
@@ -19,23 +19,30 @@ type UserProfile struct {
 	Nombre    string
 	Apellido  string
 	Email     string
-	IDRol     pgtype.Int4 // Cambiado a pgtype.Int4 para manejar NULLs
+	Telefono  *string // Opcional
+	Bio       *string // Opcional
+	Avatar    *string // Opcional
+	IDRol     int
 	Rol       string
 }
 
 func NewUserService(db *pgxpool.Pool) *UserService {
-	return &UserService{db: db}
+	return &UserService{
+		db:           db,
+		emailService: NewEmailService(),
+	}
 }
 
 // GetUserProfile obtiene el perfil completo del usuario
 func (s *UserService) GetUserProfile(ctx context.Context, idPersona int) (*UserProfile, error) {
 	var nombre, apellido, email string
-	var idRol pgtype.Int4 // Usar pgtype.Int4 para manejar NULLs
+	var telefono, bio, avatar *string
+	var idRol int
 
 	err := s.db.QueryRow(ctx,
-		"SELECT id_persona, nombre, apellido, email, id_rol FROM tb_persona WHERE id_persona = $1",
+		"SELECT id_persona, nombre, apellido, email, telefono, bio, avatar, id_rol FROM tb_persona WHERE id_persona = $1",
 		idPersona,
-	).Scan(&idPersona, &nombre, &apellido, &email, &idRol)
+	).Scan(&idPersona, &nombre, &apellido, &email, &telefono, &bio, &avatar, &idRol)
 
 	if err != nil {
 		log.Printf("Error al obtener perfil de usuario: %v", err)
@@ -43,18 +50,16 @@ func (s *UserService) GetUserProfile(ctx context.Context, idPersona int) (*UserP
 	}
 
 	// Mapear el rol
-	var rol string
-	if idRol.Valid {
-		rol = s.GetRoleNameByID(ctx, int(idRol.Int32))
-	} else {
-		rol = "Sin rol"
-	}
+	rol := s.GetRoleNameByID(ctx, idRol)
 
 	return &UserProfile{
 		IDPersona: idPersona,
 		Nombre:    nombre,
 		Apellido:  apellido,
 		Email:     email,
+		Telefono:  telefono,
+		Bio:       bio,
+		Avatar:    avatar,
 		IDRol:     idRol,
 		Rol:       rol,
 	}, nil
@@ -64,7 +69,7 @@ func (s *UserService) GetUserProfile(ctx context.Context, idPersona int) (*UserP
 func (s *UserService) GetRoleNameByID(ctx context.Context, idRol int) string {
 	var nombreRol string
 	err := s.db.QueryRow(ctx,
-		"SELECT nombre_rol FROM tb_rol WHERE id_rol = $1", // Corregido: tb_rol
+		"SELECT nombre_rol FROM tb_rol WHERE id_rol = $1",
 		idRol,
 	).Scan(&nombreRol)
 
@@ -91,8 +96,8 @@ func (s *UserService) UpdateUserRole(ctx context.Context, idPersona int, idRol i
 }
 
 // UpdateUserProfile actualiza los campos del perfil de un usuario.
-// Solo actualiza los campos que no son cadenas vacías.
-func (s *UserService) UpdateUserProfile(ctx context.Context, idPersona int, nombre, apellido string) error {
+// Solo actualiza los campos que no son cadenas vacías o nil.
+func (s *UserService) UpdateUserProfile(ctx context.Context, idPersona int, nombre, apellido string, telefono, bio, avatar *string) error {
 	var setClauses []string
 	var args []interface{}
 	argID := 1
@@ -107,6 +112,21 @@ func (s *UserService) UpdateUserProfile(ctx context.Context, idPersona int, nomb
 		args = append(args, apellido)
 		argID++
 	}
+	if telefono != nil {
+		setClauses = append(setClauses, fmt.Sprintf("telefono = $%d", argID))
+		args = append(args, *telefono)
+		argID++
+	}
+	if bio != nil {
+		setClauses = append(setClauses, fmt.Sprintf("bio = $%d", argID))
+		args = append(args, *bio)
+		argID++
+	}
+	if avatar != nil {
+		setClauses = append(setClauses, fmt.Sprintf("avatar = $%d", argID))
+		args = append(args, *avatar)
+		argID++
+	}
 
 	// Si no hay campos para actualizar, no hacer nada.
 	if len(setClauses) == 0 {
@@ -119,14 +139,42 @@ func (s *UserService) UpdateUserProfile(ctx context.Context, idPersona int, nomb
 
 	// Ejecutar la consulta
 	_, err := s.db.Exec(ctx, query, args...)
-	return err
+
+	if err != nil {
+		return err
+	}
+
+	// Enviar email de notificación (opcional, de forma asíncrona)
+	go s.sendProfileUpdateNotification(ctx, idPersona, nombre)
+
+	return nil
+}
+
+// sendProfileUpdateNotification envía una notificación cuando se actualiza el perfil
+func (s *UserService) sendProfileUpdateNotification(ctx context.Context, idPersona int, nombre string) {
+	var email string
+	err := s.db.QueryRow(ctx,
+		"SELECT email FROM tb_persona WHERE id_persona = $1",
+		idPersona,
+	).Scan(&email)
+
+	if err != nil {
+		log.Printf("Error al obtener email para notificación: %v", err)
+		return
+	}
+
+	// Enviar email de confirmación
+	err = s.emailService.SendProfileUpdateEmail(email, nombre)
+	if err != nil {
+		log.Printf("Error al enviar email de actualización de perfil: %v", err)
+	}
 }
 
 // GetRoleIDByName obtiene el ID del rol por su nombre
 func (s *UserService) GetRoleIDByName(ctx context.Context, nombreRol string) (int, error) {
 	var idRol int
 	err := s.db.QueryRow(ctx,
-		"SELECT id_rol FROM tb_rol WHERE nombre_rol = $1", // Corregido: tb_rol
+		"SELECT id_rol FROM tb_rol WHERE nombre_rol = $1",
 		nombreRol,
 	).Scan(&idRol)
 
@@ -136,4 +184,35 @@ func (s *UserService) GetRoleIDByName(ctx context.Context, nombreRol string) (in
 	}
 
 	return idRol, nil
+}
+
+// GetUserByEmail obtiene un usuario por email
+func (s *UserService) GetUserByEmail(ctx context.Context, email string) (*UserProfile, error) {
+	var idPersona int
+	var nombre, apellido string
+	var telefono, bio, avatar *string
+	var idRol int
+
+	err := s.db.QueryRow(ctx,
+		"SELECT id_persona, nombre, apellido, email, telefono, bio, avatar, id_rol FROM tb_persona WHERE email = $1",
+		email,
+	).Scan(&idPersona, &nombre, &apellido, &email, &telefono, &bio, &avatar, &idRol)
+
+	if err != nil {
+		return nil, ErrUserNotFound
+	}
+
+	rol := s.GetRoleNameByID(ctx, idRol)
+
+	return &UserProfile{
+		IDPersona: idPersona,
+		Nombre:    nombre,
+		Apellido:  apellido,
+		Email:     email,
+		Telefono:  telefono,
+		Bio:       bio,
+		Avatar:    avatar,
+		IDRol:     idRol,
+		Rol:       rol,
+	}, nil
 }
