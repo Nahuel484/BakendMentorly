@@ -101,8 +101,8 @@ func main() {
 	userRoutes.Use(handlers.AuthMiddleware())
 	{
 		// Perfil
-		userRoutes.GET("/profile", profileHandler.GetProfileHandler)    // Corregido para usar profileHandler
-		userRoutes.PUT("/profile", profileHandler.UpdateProfileHandler) // Corregido para usar profileHandler
+		userRoutes.GET("/profile", profileHandler.GetProfileHandler)
+		userRoutes.PUT("/profile", profileHandler.UpdateProfileHandler)
 
 		// Rol
 		userRoutes.POST("/select-role", authHandler.SelectRoleHandler)
