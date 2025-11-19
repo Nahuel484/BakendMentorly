@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"mentorly-backend/handlers"
+	"mentorly-backend/services"
 	"os"
 	"time"
 
@@ -52,9 +53,20 @@ func main() {
 	sessionHandler := handlers.NewSessionHandler(pool)
 	skillHandler := handlers.NewSkillHandler(pool)
 	especialidadHandler := handlers.NewEspecialidadHandler(pool)
+	notificationService := services.NewNotificationService(pool)
 	notificationHandler := handlers.NewNotificationHandler(pool)
 	profileHandler := handlers.NewProfileHandler(pool)
+	solicitudService := services.NewSolicitudService(pool)
+	solicitudHandler := handlers.NewSolicitudHandler(solicitudService)
 
+	postulacionService := services.NewPostulacionService(pool, notificationService)
+	postulacionHandler := handlers.NewPostulacionHandler(postulacionService)
+
+	contratacionService := services.NewContratacionService(pool)
+	contratacionHandler := handlers.NewContratacionHandler(contratacionService)
+
+	messageService := services.NewMessageService(pool)
+	messageHandler := handlers.NewMessageHandler(messageService)
 	// Inicializar Gin
 	router := gin.Default()
 
@@ -101,9 +113,11 @@ func main() {
 	userRoutes.Use(handlers.AuthMiddleware())
 	{
 		// Perfil
-		userRoutes.GET("/profile", profileHandler.GetProfileHandler)    // Corregido para usar profileHandler
-		userRoutes.PUT("/profile", profileHandler.UpdateProfileHandler) // Corregido para usar profileHandler
+		userRoutes.GET("/profile", profileHandler.GetProfileHandler)
+		userRoutes.PUT("/profile", profileHandler.UpdateProfileHandler)
 
+		//Explore
+		userRoutes.GET("/explore", profileHandler.ListUsersByRoleHandler)
 		// Rol
 		userRoutes.POST("/select-role", authHandler.SelectRoleHandler)
 
@@ -132,6 +146,24 @@ func main() {
 		userRoutes.PUT("/notifications/:id/read", notificationHandler.MarkAsReadHandler)
 		userRoutes.PUT("/notifications/read-all", notificationHandler.MarkAllAsReadHandler)
 		userRoutes.DELETE("/notifications/:id", notificationHandler.DeleteNotificationHandler)
+	}
+
+	secured := api.Group("/")
+	secured.Use(handlers.AuthMiddleware())
+	{
+		// Solicitudes
+		secured.POST("/solicitudes", solicitudHandler.CreateSolicitud)
+		secured.GET("/solicitudes/explore", solicitudHandler.ListSolicitudesAbiertas)
+		secured.GET("/solicitudes/mias", solicitudHandler.ListMisSolicitudes)
+		// Postulaciones
+		secured.POST("/postulaciones", postulacionHandler.CreatePostulacion)
+		secured.POST("/postulaciones/rechazar", postulacionHandler.RejectPostulacion)
+
+		// Contrataciones
+		secured.POST("/contrataciones", contratacionHandler.CreateContratacion)
+
+		// Mensajes
+		secured.POST("/messages", messageHandler.SendMessage)
 	}
 
 	// ============================================================

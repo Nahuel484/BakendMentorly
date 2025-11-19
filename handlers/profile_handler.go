@@ -5,6 +5,7 @@ import (
 	"errors"
 	"mentorly-backend/services"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,8 +13,8 @@ import (
 
 // UpdateProfileRequest estructura para actualizar perfil
 type UpdateProfileRequest struct {
-	Nombre   string  `json:"nombre" binding:"omitempty,min=2"`
-	Apellido string  `json:"apellido" binding:"omitempty,min=2"`
+	Nombre   *string `json:"nombre" binding:"omitempty,min=2"`
+	Apellido *string `json:"apellido" binding:"omitempty,min=2"`
 	Telefono *string `json:"telefono" binding:"omitempty"`
 	Bio      *string `json:"bio" binding:"omitempty,max=500"`
 	Avatar   *string `json:"avatar" binding:"omitempty,url"` // URL de la imagen
@@ -46,14 +47,23 @@ func (h *ProfileHandler) UpdateProfileHandler(c *gin.Context) {
 		return
 	}
 
-	// Si no se envía ningún dato, no hay nada que hacer
-	if req.Nombre == "" && req.Apellido == "" && req.Telefono == nil && req.Bio == nil && req.Avatar == nil {
+	// Si no se envió ningún dato, no hay nada que hacer
+	if req.Nombre == nil && req.Apellido == nil && req.Telefono == nil && req.Bio == nil && req.Avatar == nil {
 		c.JSON(http.StatusBadRequest, ResponseData{Success: false, Message: "No se proporcionaron datos para actualizar"})
 		return
 	}
 
+	// Preparar valores para enviar al servicio
+	var nombre, apellido string
+	if req.Nombre != nil {
+		nombre = *req.Nombre
+	}
+	if req.Apellido != nil {
+		apellido = *req.Apellido
+	}
+
 	// Llamar al servicio para actualizar el perfil
-	err := h.userService.UpdateUserProfile(context.Background(), idPersona, req.Nombre, req.Apellido, req.Telefono, req.Bio, req.Avatar)
+	err := h.userService.UpdateUserProfile(context.Background(), idPersona, nombre, apellido, req.Telefono, req.Bio, req.Avatar)
 	if err != nil {
 		if errors.Is(err, services.ErrUserNotFound) {
 			c.JSON(http.StatusNotFound, ResponseData{Success: false, Message: "Usuario no encontrado"})
@@ -118,5 +128,38 @@ func (h *ProfileHandler) GetProfileHandler(c *gin.Context) {
 			"avatar":     profile.Avatar,
 			"rol":        profile.Rol,
 		},
+	})
+}
+
+// ListUsersByRoleHandler - Lista usuarios según rol ("mentor" o "emprendedor")
+func (h *ProfileHandler) ListUsersByRoleHandler(c *gin.Context) {
+	role := c.Query("role")
+	if role == "" {
+		c.JSON(http.StatusBadRequest, ResponseData{
+			Success: false,
+			Message: "El parámetro 'role' es requerido",
+		})
+		return
+	}
+
+	role = strings.ToLower(role)
+	if role == "startup" {
+		// En tu backend el rol realmente es "emprendedor"
+		role = "emprendedor"
+	}
+
+	users, err := h.userService.ListUsersByRole(context.Background(), role)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ResponseData{
+			Success: false,
+			Message: "Error al obtener usuarios por rol",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, ResponseData{
+		Success: true,
+		Message: "Usuarios obtenidos",
+		Data:    users,
 	})
 }
