@@ -67,6 +67,13 @@ func main() {
 
 	messageService := services.NewMessageService(pool)
 	messageHandler := handlers.NewMessageHandler(messageService)
+
+	// 🔹 Planes (para frontend + pagos)
+	planService := services.NewPlanService(pool)
+	planHandler := handlers.NewPlanHandler(planService)
+
+	mpService := services.NewMercadoPagoService()
+	paymentHandler := handlers.NewPaymentHandler(planService, mpService)
 	// Inicializar Gin
 	router := gin.Default()
 
@@ -105,6 +112,9 @@ func main() {
 	api.GET("/auth/google/callback", oauthHandler.GoogleCallbackHandler)
 	api.GET("/auth/github/callback", oauthHandler.GitHubCallbackHandler)
 	api.GET("/auth/linkedin/callback", oauthHandler.LinkedInCallbackHandler)
+
+	api.GET("/planes", planHandler.GetActivePlans)
+	api.GET("/planes/:id", planHandler.GetPlanByID)
 
 	// ============================================================
 	// RUTAS PROTEGIDAS - USUARIO
@@ -161,6 +171,8 @@ func main() {
 
 		// Contrataciones
 		secured.POST("/contrataciones", contratacionHandler.CreateContratacion)
+		// Mp
+		secured.POST("/payments/mercadopago/preference", paymentHandler.CreateMercadoPagoPreference)
 
 		// Mensajes
 		secured.POST("/messages", messageHandler.SendMessage)

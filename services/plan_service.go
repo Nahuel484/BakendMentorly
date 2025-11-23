@@ -104,3 +104,27 @@ func (s *PlanService) DeletePlan(ctx context.Context, id int) error {
 	}
 	return nil
 }
+
+func (s *PlanService) GetActivePlans(ctx context.Context) ([]models.Plan, error) {
+	var plans []models.Plan
+	query := `SELECT id_plan, nombre_plan, precio, descripcion, activo 
+              FROM tb_plan 
+              WHERE activo = TRUE 
+              ORDER BY precio ASC`
+
+	rows, err := s.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var p models.Plan
+		if err := rows.Scan(&p.ID, &p.Nombre, &p.Precio, &p.Descripcion, &p.Activo); err != nil {
+			return nil, err
+		}
+		plans = append(plans, p)
+	}
+
+	return plans, nil
+}
