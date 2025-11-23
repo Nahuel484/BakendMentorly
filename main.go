@@ -209,8 +209,12 @@ func main() {
 		admin.PUT("/plans/:id", authHandler.UpdatePlanHandler)
 		admin.DELETE("/plans/:id", authHandler.DeletePlanHandler)
 
-		// Habilidades (crear y gestionar)
-		admin.POST("/skills", skillHandler.CreateSkillHandler)
+		// Habilidades del usuario
+		userRoutes.GET("/skills", skillHandler.GetUserSkillsHandler)
+		userRoutes.POST("/skills", skillHandler.AddSkillToUserHandler)
+		userRoutes.PUT("/skills/:skill_id", skillHandler.UpdateUserSkillHandler) // NUEVA RUTA
+		userRoutes.PUT("/skills/:skill_id/level", skillHandler.UpdateUserSkillLevelHandler)
+		userRoutes.DELETE("/skills/:skill_id", skillHandler.RemoveUserSkillHandler)
 
 		// Especialidades (crear y gestionar)
 		admin.POST("/especialidades", especialidadHandler.CreateEspecialidadHandler)
