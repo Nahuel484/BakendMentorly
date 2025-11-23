@@ -28,12 +28,18 @@ type CreateSkillRequest struct {
 }
 
 type AddUserSkillRequest struct {
-	IDHabilidad  int    `json:"id_habilidad" binding:"required"`
-	NivelDominio string `json:"nivel_dominio" binding:"required,oneof=beginner intermediate advanced"`
+	IDHabilidad          int     `json:"id_habilidad" binding:"required"`
+	NivelHabilidad       string  `json:"nivel_habilidad" binding:"required,oneof=beginner intermediate advanced"`
+	DescripcionHabilidad *string `json:"descripcion_habilidad"`
+}
+
+type UpdateSkillRequest struct {
+	NivelHabilidad       string  `json:"nivel_habilidad" binding:"required,oneof=beginner intermediate advanced"`
+	DescripcionHabilidad *string `json:"descripcion_habilidad"`
 }
 
 type UpdateSkillLevelRequest struct {
-	NivelDominio string `json:"nivel_dominio" binding:"required,oneof=beginner intermediate advanced"`
+	NivelHabilidad string `json:"nivel_habilidad" binding:"required,oneof=beginner intermediate advanced"`
 }
 
 // CreateSkillHandler - Crear una nueva habilidad (admin)
@@ -109,7 +115,7 @@ func (h *SkillHandler) GetSkillByIDHandler(c *gin.Context) {
 	})
 }
 
-// AddSkillToUserHandler - Agregar una habilidad al usuario actual
+// AddSkillToUserHandler - Agregar una habilidad al usuario actual con nivel y descripción
 func (h *SkillHandler) AddSkillToUserHandler(c *gin.Context) {
 	idPersonaInterface, exists := c.Get("id_persona")
 	if !exists {
@@ -138,7 +144,7 @@ func (h *SkillHandler) AddSkillToUserHandler(c *gin.Context) {
 		return
 	}
 
-	userSkill, err := h.skillService.AddSkillToUser(context.Background(), idPersona, req.IDHabilidad, req.NivelDominio)
+	userSkill, err := h.skillService.AddSkillToUser(context.Background(), idPersona, req.IDHabilidad, req.NivelHabilidad, req.DescripcionHabilidad)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ResponseData{
 			Success: false,
@@ -223,7 +229,42 @@ func (h *SkillHandler) RemoveUserSkillHandler(c *gin.Context) {
 	})
 }
 
-// UpdateUserSkillLevelHandler - Actualizar el nivel de dominio de una habilidad
+// UpdateUserSkillHandler - Actualizar el nivel y descripción de una habilidad
+func (h *SkillHandler) UpdateUserSkillHandler(c *gin.Context) {
+	idUsuarioHabilidad, err := strconv.Atoi(c.Param("skill_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ResponseData{
+			Success: false,
+			Message: "ID de habilidad inválido",
+		})
+		return
+	}
+
+	var req UpdateSkillRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ResponseData{
+			Success: false,
+			Message: "Datos inválidos: " + err.Error(),
+		})
+		return
+	}
+
+	err = h.skillService.UpdateUserSkill(context.Background(), idUsuarioHabilidad, req.NivelHabilidad, req.DescripcionHabilidad)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ResponseData{
+			Success: false,
+			Message: "Error al actualizar habilidad",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, ResponseData{
+		Success: true,
+		Message: "Habilidad actualizada correctamente",
+	})
+}
+
+// UpdateUserSkillLevelHandler - Actualizar solo el nivel de dominio de una habilidad (mantener compatibilidad)
 func (h *SkillHandler) UpdateUserSkillLevelHandler(c *gin.Context) {
 	idUsuarioHabilidad, err := strconv.Atoi(c.Param("skill_id"))
 	if err != nil {
@@ -243,7 +284,7 @@ func (h *SkillHandler) UpdateUserSkillLevelHandler(c *gin.Context) {
 		return
 	}
 
-	err = h.skillService.UpdateUserSkillLevel(context.Background(), idUsuarioHabilidad, req.NivelDominio)
+	err = h.skillService.UpdateUserSkillLevel(context.Background(), idUsuarioHabilidad, req.NivelHabilidad)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ResponseData{
 			Success: false,
