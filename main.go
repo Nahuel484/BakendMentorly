@@ -18,6 +18,8 @@ import (
 func main() {
 	// Cargar variables de entorno
 	err := godotenv.Load()
+	fmt.Println("MP ACCESS:", os.Getenv("MP_ACCESS_TOKEN"))
+	fmt.Println("FRONT:", os.Getenv("FRONTEND_URL"))
 	if err != nil {
 		log.Println("Advertencia: No se pudo cargar el archivo .env")
 	}
@@ -210,11 +212,11 @@ func main() {
 		admin.DELETE("/plans/:id", authHandler.DeletePlanHandler)
 
 		// Habilidades del usuario
-		userRoutes.GET("/skills", skillHandler.GetUserSkillsHandler)
-		userRoutes.POST("/skills", skillHandler.AddSkillToUserHandler)
-		userRoutes.PUT("/skills/:skill_id", skillHandler.UpdateUserSkillHandler) // NUEVA RUTA
-		userRoutes.PUT("/skills/:skill_id/level", skillHandler.UpdateUserSkillLevelHandler)
-		userRoutes.DELETE("/skills/:skill_id", skillHandler.RemoveUserSkillHandler)
+		admin.GET("/skills", skillHandler.GetUserSkillsHandler)
+		admin.POST("/skills", skillHandler.AddSkillToUserHandler)
+		admin.PUT("/skills/:skill_id", skillHandler.UpdateUserSkillHandler) // NUEVA RUTA
+		admin.PUT("/skills/:skill_id/level", skillHandler.UpdateUserSkillLevelHandler)
+		admin.DELETE("/skills/:skill_id", skillHandler.RemoveUserSkillHandler)
 
 		// Especialidades (crear y gestionar)
 		admin.POST("/especialidades", especialidadHandler.CreateEspecialidadHandler)
