@@ -75,7 +75,7 @@ func (h *PaymentHandler) CreateMercadoPagoPreference(c *gin.Context) {
 			return
 		}
 
-		// ✔️ USAMOS id_plan COMO NIVEL (0=gratis, 1=pro, 2/3=premium)
+		// id_plan COMO NIVEL (0=gratis, 1=pro, 2=premium)
 		if plan.ID <= currentPlan.ID {
 			c.JSON(400, ResponseData{
 				Success: false,

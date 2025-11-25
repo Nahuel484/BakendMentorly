@@ -42,7 +42,7 @@ func main() {
 		log.Fatalf("Error al parsear DATABASE_URL: %v", err)
 	}
 
-	// 👉 Usar siempre Simple Protocol (sin prepared statements)
+	// Usar siempre Simple Protocol (sin prepared statements)
 	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 
 	pool, err := pgxpool.NewWithConfig(context.Background(), config)

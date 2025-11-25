@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mentorly-backend/services"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,10 @@ func NewOAuthHandler(db *pgxpool.Pool) *OAuthHandler {
 		authService: services.NewAuthService(db),
 	}
 }
+
+// =====================================================
+//  CALLBACKS OAUTH
+// =====================================================
 
 // GoogleCallbackHandler maneja el callback de Google OAuth
 func (h *OAuthHandler) GoogleCallbackHandler(c *gin.Context) {
@@ -104,22 +109,40 @@ func (h *OAuthHandler) LinkedInCallbackHandler(c *gin.Context) {
 	h.handleOAuthLogin(c, userInfo)
 }
 
-// handleOAuthLogin gestiona el login/registro con OAuth
+// =====================================================
+//  LÓGICA COMÚN DE LOGIN + REDIRECCIÓN AL FRONT
+// =====================================================
+
 func (h *OAuthHandler) handleOAuthLogin(c *gin.Context, oauthUser *services.OAuthUserInfo) {
-	// Intentar loguear al usuario por email. Si no existe, lo registra sin contraseña.
-	idPersona, nombre, err := h.authService.LoginUser(c.Request.Context(), oauthUser.Email, "")
+	ctx := c.Request.Context()
+
+	// Intentar loguear al usuario por email. Si no existe, lo registramos sin contraseña.
+	idPersona, nombre, err := h.authService.LoginUser(ctx, oauthUser.Email, "")
 	if err != nil {
-		// Si el usuario no existe, lo registramos
-		if errors.Is(err, services.ErrInvalidCredentials) { // Reutilizamos este error para "no encontrado"
-			// El registro con OAuth no necesita contraseña, pasamos un hash vacío.
-			idPersona, err = h.authService.RegisterUser(context.Background(), oauthUser.Name, "", oauthUser.Email, "")
+		// Usamos ErrInvalidCredentials como "no encontrado"
+		if errors.Is(err, services.ErrInvalidCredentials) {
+			idPersona, err = h.authService.RegisterUser(
+				context.Background(),
+				oauthUser.Name,
+				"",
+				oauthUser.Email,
+				"",
+			)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al registrar usuario con OAuth"})
+				c.JSON(http.StatusInternalServerError, ResponseData{
+					Success: false,
+					Message: "Error al registrar usuario con OAuth",
+					Data:    err.Error(),
+				})
 				return
 			}
 			nombre = oauthUser.Name
 		} else {
-			c.JSON(http.StatusInternalServerError, ResponseData{Success: false, Message: "Error al procesar usuario con OAuth"})
+			c.JSON(http.StatusInternalServerError, ResponseData{
+				Success: false,
+				Message: "Error al procesar usuario con OAuth",
+				Data:    err.Error(),
+			})
 			return
 		}
 	}
@@ -134,17 +157,42 @@ func (h *OAuthHandler) handleOAuthLogin(c *gin.Context, oauthUser *services.OAut
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Login successful",
-		"data": TokenResponse{
-			Token:     token,
-			IDPersona: idPersona,
-			Email:     oauthUser.Email,
-			Nombre:    nombre,
-		},
-	})
+	// ================================
+	//  REDIRECCIÓN AL FRONTEND
+	// ================================
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		// fallback para desarrollo
+		frontendURL = "http://localhost:5173"
+	}
+
+	redirectURL, err := url.Parse(frontendURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "Error construyendo URL de redirección",
+			"data":    err.Error(),
+		})
+		return
+	}
+
+	// Ruta en el front que va a leer el token (ej: /oauth/callback)
+	redirectURL.Path = "/oauth/callback"
+
+	q := redirectURL.Query()
+	q.Set("token", token)
+	q.Set("id_persona", fmt.Sprintf("%d", idPersona))
+	q.Set("email", oauthUser.Email)
+	q.Set("nombre", nombre)
+	redirectURL.RawQuery = q.Encode()
+
+	// 🚀 Mandamos al usuario al frontend
+	c.Redirect(http.StatusFound, redirectURL.String())
 }
+
+// =====================================================
+//  ENDPOINTS PARA OBTENER LAS URLs DE LOGIN
+// =====================================================
 
 // GetGoogleAuthURL retorna la URL de autenticación de Google
 func (h *OAuthHandler) GetGoogleAuthURL(c *gin.Context) {

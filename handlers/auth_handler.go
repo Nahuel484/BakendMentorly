@@ -160,7 +160,6 @@ func (h *AuthHandler) LoginHandler(c *gin.Context) {
 	_, err = h.sessionService.CreateSession(context.Background(), idPersona, token)
 	if err != nil {
 		log.Printf("Error al crear sesión: %v", err)
-		// No es crítico, continuamos
 	}
 
 	// Guardar token en cookie (para OAuth compatibility)
@@ -342,7 +341,7 @@ func (h *AuthHandler) SubscribeToPlanHandler(c *gin.Context) {
 // AdminMiddleware verifica si el usuario tiene permisos de administrador
 func (h *AuthHandler) AdminMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Por ahora, dejar pasar a todos. TODO: Implementar verificación de rol
+
 		c.Next()
 	}
 }

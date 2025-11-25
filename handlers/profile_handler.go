@@ -144,7 +144,6 @@ func (h *ProfileHandler) ListUsersByRoleHandler(c *gin.Context) {
 
 	role = strings.ToLower(role)
 	if role == "startup" {
-		// En tu backend el rol realmente es "emprendedor"
 		role = "emprendedor"
 	}
 

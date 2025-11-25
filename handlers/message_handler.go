@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"net/http"
-	"strconv" // 👈 IMPORTANTE
+	"strconv"
 
 	"mentorly-backend/services"
 
@@ -175,7 +175,7 @@ func (h *MessageHandler) CerrarConversacion(c *gin.Context) {
 		return
 	}
 
-	// 👇 el service espera (ctx, idConversacion int, idPersona int)
+	// el service espera (ctx, idConversacion int, idPersona int)
 	if err := h.messageService.CerrarConversacion(
 		c.Request.Context(),
 		idConversacion,

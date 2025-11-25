@@ -25,7 +25,7 @@ func NewMPWebhookHandler(mp *services.MercadoPagoService, ss *services.Suscripci
 func (h *MPWebhookHandler) HandleWebhook(c *gin.Context) {
 	var body map[string]interface{}
 
-	// Intentamos parsear el JSON, pero si falla igual seguimos porque MP manda datos por query
+	// Se intenta parsear el JSON, pero si falla igual seguimos porque MP manda datos por query
 	if err := c.BindJSON(&body); err != nil {
 		log.Println("Error parseando body de webhook MP:", err)
 	} else {
