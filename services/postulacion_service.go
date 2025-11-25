@@ -20,9 +20,10 @@ func NewPostulacionService(db *pgxpool.Pool, ns *NotificationService) *Postulaci
 }
 
 type Postulacion struct {
-	IDPostulacion int `json:"id_postulacion"`
-	IDPersona     int `json:"id_persona"`
-	IDSolicitud   int `json:"id_solicitud"`
+	IDPostulacion int  `json:"id_postulacion"`
+	IDPersona     int  `json:"id_persona"`
+	IDSolicitud   int  `json:"id_solicitud"`
+	EsPremium     bool `json:"es_premium"` // no se llena aún aquí, pero lo podés usar en otro endpoint si querés
 }
 
 // Crea una postulación y notifica por web + email al contratante
@@ -159,4 +160,19 @@ func (s *PostulacionService) RejectPostulacion(
 	}
 
 	return nil
+}
+
+// CountPostulacionesMes cuenta cuántas postulaciones hizo la persona en el mes actual
+func (s *PostulacionService) CountPostulacionesMes(ctx context.Context, idPersona int) (int, error) {
+	var count int
+	err := s.db.QueryRow(ctx, `
+        SELECT COUNT(*)
+        FROM tb_postulacion
+        WHERE id_persona = $1
+          AND date_trunc('month', fecha_postulacion::timestamp) = date_trunc('month', NOW())
+    `, idPersona).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }

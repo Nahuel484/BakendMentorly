@@ -9,11 +9,15 @@ import (
 )
 
 type ContratacionService struct {
-	db *pgxpool.Pool
+	db                  *pgxpool.Pool
+	notificationService *NotificationService
 }
 
-func NewContratacionService(db *pgxpool.Pool) *ContratacionService {
-	return &ContratacionService{db: db}
+func NewContratacionService(db *pgxpool.Pool, ns *NotificationService) *ContratacionService {
+	return &ContratacionService{
+		db:                  db,
+		notificationService: ns,
+	}
 }
 
 type Contratacion struct {
@@ -89,9 +93,9 @@ func (s *ContratacionService) CreateContratacion(
 
 	err = s.db.QueryRow(ctx, `
         INSERT INTO tb_conversacion
-            (id_contratacion, asunto, fecha_creacion)
+            (id_contratacion, asunto, fecha_creacion, cerrada)
         VALUES
-            ($1, $2, NOW())
+            ($1, $2, NOW(), FALSE)
         RETURNING id_conversacion, id_contratacion, asunto, fecha_creacion
     `,
 		contr.IDContratacion,
@@ -106,20 +110,31 @@ func (s *ContratacionService) CreateContratacion(
 		return nil, fmt.Errorf("no se pudo crear la conversación: %w", err)
 	}
 
-	// 4) Notificación al mentor (contratado)
-	_, err = s.db.Exec(ctx, `
-        INSERT INTO tb_notificacion
-            (id_persona_destinatario, id_tipo_notificacion, mensaje, fecha_creacion, estado)
-        VALUES
-            ($1, $2, $3, NOW(), $4)
-    `,
-		idPersonaPostulante,
-		2, // 2 = "fuiste contratado"
-		fmt.Sprintf("Fuiste contratado para la solicitud '%s'", tituloSolicitud),
-		"pendiente",
-	)
-	if err != nil {
-		fmt.Printf("error creando notificación de contratación: %v\n", err)
+	// 4) Notificaciones usando NotificationService
+	if s.notificationService != nil {
+		// Notificar al mentor (contratado)
+		_, err = s.notificationService.CreateNotification(ctx, NotificationRequest{
+			IDPersona:   idPersonaPostulante,
+			Titulo:      "¡Fuiste contratado!",
+			Mensaje:     fmt.Sprintf("Fuiste contratado para la solicitud '%s'. Ya podés hablar con el cliente desde el chat.", tituloSolicitud),
+			Tipo:        "info",
+			EnviarEmail: true,
+		})
+		if err != nil {
+			fmt.Printf("error creando notificación de contratación (mentor): %v\n", err)
+		}
+
+		// Opcional: notificar al contratante
+		_, err = s.notificationService.CreateNotification(ctx, NotificationRequest{
+			IDPersona:   idContratante,
+			Titulo:      "Contratación creada",
+			Mensaje:     fmt.Sprintf("Creaste una contratación con un mentor para la solicitud '%s'.", tituloSolicitud),
+			Tipo:        "info",
+			EnviarEmail: false,
+		})
+		if err != nil {
+			fmt.Printf("error creando notificación de contratación (contratante): %v\n", err)
+		}
 	}
 
 	return &ContratacionConConversacion{

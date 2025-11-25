@@ -2,30 +2,84 @@ package services
 
 import (
 	"context"
-	"mentorly-backend/models"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type SubscriptionService struct {
+type SuscripcionService struct {
 	db *pgxpool.Pool
 }
 
-func NewSubscriptionService(db *pgxpool.Pool) *SubscriptionService {
-	return &SubscriptionService{db: db}
+type Suscripcion struct {
+	IDPersona       int
+	FechaInicial    time.Time
+	FechaExpiracion *time.Time
+	IDPlan          int
 }
 
-// CreateSubscription crea una nueva suscripción para un usuario a un plan.
-func (s *SubscriptionService) CreateSubscription(ctx context.Context, idPersona, idPlan int) (*models.Subscription, error) {
-	var sub models.Subscription
-	fechaInicial := time.Now()
-	fechaExpiracion := fechaInicial.AddDate(0, 1, 0) // Expira en 1 mes
+const DefaultFreePlanID = 0
 
-	query := `INSERT INTO tb_suscripcion (id_persona, id_plan, fecha_inicial, fecha_expiracion) VALUES ($1, $2, $3, $4) RETURNING id_suscripcion, id_persona, id_plan, fecha_inicial, fecha_expiracion`
-	err := s.db.QueryRow(ctx, query, idPersona, idPlan, fechaInicial, fechaExpiracion).Scan(&sub.ID, &sub.IDPersona, &sub.IDPlan, &sub.FechaInicial, &sub.FechaExpiracion)
+func NewSuscripcionService(db *pgxpool.Pool) *SuscripcionService {
+	return &SuscripcionService{db}
+}
+
+func (s *SuscripcionService) CreateFreeSubscription(ctx context.Context, personaID int) error {
+	_, err := s.db.Exec(ctx, `
+        INSERT INTO tb_suscripcion (id_persona, id_plan, fecha_inicial, fecha_expiracion)
+        VALUES ($1, $2, NOW(), NULL)
+        ON CONFLICT (id_persona) DO NOTHING
+    `, personaID, DefaultFreePlanID)
+
+	return err
+}
+
+func (s *SuscripcionService) Activate(userID, planID int) error {
+	now := time.Now().UTC()
+	expires := now.AddDate(0, 1, 0) // +30 días
+
+	_, err := s.db.Exec(
+		context.Background(),
+		`
+		INSERT INTO tb_suscripcion (id_persona, fecha_inicial, fecha_expiracion, id_plan)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id_persona)
+		DO UPDATE SET 
+			id_plan = EXCLUDED.id_plan,
+			fecha_inicial = EXCLUDED.fecha_inicial,
+			fecha_expiracion = EXCLUDED.fecha_expiracion
+		`,
+		userID, now, expires, planID,
+	)
+
+	return err
+}
+
+func (s *SuscripcionService) GetActiveByPersona(ctx context.Context, personaID int) (*Suscripcion, error) {
+	var sub Suscripcion
+	var fechaExp *time.Time
+
+	err := s.db.QueryRow(ctx, `
+        SELECT id_persona, fecha_inicial, fecha_expiracion, id_plan
+        FROM tb_suscripcion
+        WHERE id_persona = $1
+          AND (fecha_expiracion IS NULL OR fecha_expiracion > NOW())
+        LIMIT 1
+    `, personaID).Scan(
+		&sub.IDPersona,
+		&sub.FechaInicial,
+		&fechaExp,
+		&sub.IDPlan,
+	)
+
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
+
+	sub.FechaExpiracion = fechaExp
 	return &sub, nil
 }

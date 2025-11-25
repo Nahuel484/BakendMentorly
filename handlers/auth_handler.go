@@ -12,30 +12,32 @@ import (
 )
 
 type AuthHandler struct {
-	db           *pgxpool.Pool
-	authService  *services.AuthService
-	userService  *services.UserService
-	roleService  *services.RoleService
-	sessionService *services.SessionService
+	db                 *pgxpool.Pool
+	authService        *services.AuthService
+	userService        *services.UserService
+	roleService        *services.RoleService
+	sessionService     *services.SessionService
+	suscripcionService *services.SuscripcionService
 }
 
-func NewAuthHandler(db *pgxpool.Pool) *AuthHandler {
+func NewAuthHandler(db *pgxpool.Pool, ss *services.SuscripcionService) *AuthHandler {
 	return &AuthHandler{
-		db:             db,
-		authService:    services.NewAuthService(db),
-		userService:    services.NewUserService(db),
-		roleService:    services.NewRoleService(db),
-		sessionService: services.NewSessionService(db),
+		db:                 db,
+		authService:        services.NewAuthService(db),
+		userService:        services.NewUserService(db),
+		roleService:        services.NewRoleService(db),
+		sessionService:     services.NewSessionService(db),
+		suscripcionService: ss,
 	}
 }
 
 // RegisterRequest estructura para registro
 type RegisterRequest struct {
-	Nombre      string `json:"nombre" binding:"required,min=2"`
-	Apellido    string `json:"apellido" binding:"required,min=2"`
-	Email       string `json:"email" binding:"required,email"`
-	Contrasena  string `json:"contrasena" binding:"required,min=6"`
-	Confirmar   string `json:"confirmar" binding:"required,eqfield=Contrasena"`
+	Nombre     string `json:"nombre" binding:"required,min=2"`
+	Apellido   string `json:"apellido" binding:"required,min=2"`
+	Email      string `json:"email" binding:"required,email"`
+	Contrasena string `json:"contrasena" binding:"required,min=6"`
+	Confirmar  string `json:"confirmar" binding:"required,eqfield=Contrasena"`
 }
 
 // LoginRequest estructura para login

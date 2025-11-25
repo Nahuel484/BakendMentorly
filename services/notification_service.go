@@ -15,23 +15,23 @@ type NotificationService struct {
 }
 
 type Notification struct {
-	IDNotificacion  int       `json:"id_notificacion"`
-	IDPersona       int       `json:"id_persona"`
-	Titulo          string    `json:"titulo"`
-	Mensaje         string    `json:"mensaje"`
-	Tipo            string    `json:"tipo"` // "info", "success", "warning", "error"
-	Leida           bool      `json:"leida"`
-	EnviadoEmail    bool      `json:"enviado_email"`
-	FechaCreacion   time.Time `json:"fecha_creacion"`
-	FechaLectura    *time.Time `json:"fecha_lectura,omitempty"`
+	IDNotificacion int        `json:"id_notificacion"`
+	IDPersona      int        `json:"id_persona"`
+	Titulo         string     `json:"titulo"`
+	Mensaje        string     `json:"mensaje"`
+	Tipo           string     `json:"tipo"` // "info", "success", "warning", "error"
+	Leida          bool       `json:"leida"`
+	EnviadoEmail   bool       `json:"enviado_email"`
+	FechaCreacion  time.Time  `json:"fecha_creacion"`
+	FechaLectura   *time.Time `json:"fecha_lectura,omitempty"`
 }
 
 type NotificationRequest struct {
-	IDPersona    int    `json:"id_persona"`
-	Titulo       string `json:"titulo"`
-	Mensaje      string `json:"mensaje"`
-	Tipo         string `json:"tipo"`
-	EnviarEmail  bool   `json:"enviar_email"`
+	IDPersona   int    `json:"id_persona"`
+	Titulo      string `json:"titulo"`
+	Mensaje     string `json:"mensaje"`
+	Tipo        string `json:"tipo"`
+	EnviarEmail bool   `json:"enviar_email"`
 }
 
 func NewNotificationService(db *pgxpool.Pool) *NotificationService {
@@ -44,7 +44,7 @@ func NewNotificationService(db *pgxpool.Pool) *NotificationService {
 // CreateNotification crea una nueva notificación
 func (s *NotificationService) CreateNotification(ctx context.Context, req NotificationRequest) (*Notification, error) {
 	var notif Notification
-	
+
 	query := `INSERT INTO tb_Notificacion (ID_Persona, Titulo, Mensaje, Tipo, Leida, Enviado_Email, Fecha_Creacion) 
 	          VALUES ($1, $2, $3, $4, $5, $6, $7) 
 	          RETURNING ID_Notificacion, ID_Persona, Titulo, Mensaje, Tipo, Leida, Enviado_Email, Fecha_Creacion`
@@ -74,9 +74,14 @@ func (s *NotificationService) CreateNotification(ctx context.Context, req Notifi
 
 	// Si se solicita enviar email, hacerlo de forma asíncrona
 	if req.EnviarEmail {
-		go s.sendEmailNotification(ctx, &notif)
-	}
+		go func(n Notification) {
+			// Contexto independiente del request, con timeout
+			ctxEmail, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 
+			s.sendEmailNotification(ctxEmail, &n)
+		}(notif)
+	}
 	return &notif, nil
 }
 
@@ -114,15 +119,15 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notif *
 // GetUserNotifications obtiene todas las notificaciones de un usuario
 func (s *NotificationService) GetUserNotifications(ctx context.Context, idPersona int, soloNoLeidas bool) ([]Notification, error) {
 	var notifications []Notification
-	
+
 	query := `SELECT ID_Notificacion, ID_Persona, Titulo, Mensaje, Tipo, Leida, Enviado_Email, Fecha_Creacion, Fecha_Lectura 
 	          FROM tb_Notificacion 
 	          WHERE ID_Persona = $1`
-	
+
 	if soloNoLeidas {
 		query += " AND Leida = false"
 	}
-	
+
 	query += " ORDER BY Fecha_Creacion DESC"
 
 	rows, err := s.db.Query(ctx, query, idPersona)
@@ -158,7 +163,7 @@ func (s *NotificationService) MarkAsRead(ctx context.Context, idNotificacion int
 	query := `UPDATE tb_Notificacion 
 	          SET Leida = true, Fecha_Lectura = $1 
 	          WHERE ID_Notificacion = $2 AND ID_Persona = $3 AND Leida = false`
-	
+
 	result, err := s.db.Exec(ctx, query, time.Now(), idNotificacion, idPersona)
 	if err != nil {
 		return err
@@ -176,7 +181,7 @@ func (s *NotificationService) MarkAllAsRead(ctx context.Context, idPersona int) 
 	query := `UPDATE tb_Notificacion 
 	          SET Leida = true, Fecha_Lectura = $1 
 	          WHERE ID_Persona = $2 AND Leida = false`
-	
+
 	_, err := s.db.Exec(ctx, query, time.Now(), idPersona)
 	return err
 }
@@ -185,7 +190,7 @@ func (s *NotificationService) MarkAllAsRead(ctx context.Context, idPersona int) 
 func (s *NotificationService) GetUnreadCount(ctx context.Context, idPersona int) (int, error) {
 	var count int
 	query := `SELECT COUNT(*) FROM tb_Notificacion WHERE ID_Persona = $1 AND Leida = false`
-	
+
 	err := s.db.QueryRow(ctx, query, idPersona).Scan(&count)
 	if err != nil {
 		return 0, err
@@ -197,7 +202,7 @@ func (s *NotificationService) GetUnreadCount(ctx context.Context, idPersona int)
 // DeleteNotification elimina una notificación
 func (s *NotificationService) DeleteNotification(ctx context.Context, idNotificacion int, idPersona int) error {
 	query := `DELETE FROM tb_Notificacion WHERE ID_Notificacion = $1 AND ID_Persona = $2`
-	
+
 	result, err := s.db.Exec(ctx, query, idNotificacion, idPersona)
 	if err != nil {
 		return err
@@ -213,7 +218,7 @@ func (s *NotificationService) DeleteNotification(ctx context.Context, idNotifica
 // GetNotificationByID obtiene una notificación específica
 func (s *NotificationService) GetNotificationByID(ctx context.Context, idNotificacion int, idPersona int) (*Notification, error) {
 	var notif Notification
-	
+
 	query := `SELECT ID_Notificacion, ID_Persona, Titulo, Mensaje, Tipo, Leida, Enviado_Email, Fecha_Creacion, Fecha_Lectura 
 	          FROM tb_Notificacion 
 	          WHERE ID_Notificacion = $1 AND ID_Persona = $2`

@@ -23,6 +23,7 @@ type Solicitud struct {
 	Descripcion      string    `json:"descripcion"`
 	FechaPublicacion time.Time `json:"fecha_publicacion"`
 	Estado           string    `json:"estado"`
+	EsPremium        bool      `json:"es_premium"` // se usa en explore
 }
 
 type CreateSolicitudInput struct {
@@ -36,6 +37,8 @@ type PostulacionWithMentor struct {
 	IDPersona     int    `json:"id_persona"`
 	MentorNombre  string `json:"mentor_nombre"`
 	MentorEmail   string `json:"mentor_email"`
+	EsPremium     bool   `json:"es_premium"` // mentor premium
+	Contratado    bool   `json:"contratado"`
 }
 
 // Solicitud con la lista de postulaciones
@@ -88,14 +91,29 @@ func (s *SolicitudService) CreateSolicitud(
 	return &sol, nil
 }
 
-// Lista solicitudes abiertas para que las vean mentores
+// Lista solicitudes abiertas para que las vean mentores (explore)
+// 👉 Ahora: contratantes Premium primero
 func (s *SolicitudService) ListSolicitudesAbiertas(ctx context.Context) ([]Solicitud, error) {
+	// Premium = plan con id_plan >= 3 (ajustá si tu premium es otro id)
+	const premiumPlanID = 2
+
 	rows, err := s.db.Query(ctx, `
-        SELECT id_solicitud, id_contratante, titulo, descripcion, fecha_publicacion, estado
-        FROM tb_solicitud
-        WHERE estado = 'abierta'
-        ORDER BY fecha_publicacion DESC
-    `)
+        SELECT 
+            sol.id_solicitud,
+            sol.id_contratante,
+            sol.titulo,
+            sol.descripcion,
+            sol.fecha_publicacion,
+            sol.estado,
+            COALESCE(CASE 
+                WHEN sus.id_plan >= $1 THEN true
+                ELSE false
+            END, false) AS es_premium
+        FROM tb_solicitud sol
+        LEFT JOIN tb_suscripcion sus ON sus.id_persona = sol.id_contratante
+        WHERE sol.estado = 'abierta'
+        ORDER BY es_premium DESC, sol.fecha_publicacion DESC
+    `, premiumPlanID)
 	if err != nil {
 		return nil, fmt.Errorf("error al listar solicitudes: %w", err)
 	}
@@ -111,16 +129,22 @@ func (s *SolicitudService) ListSolicitudesAbiertas(ctx context.Context) ([]Solic
 			&sol.Descripcion,
 			&sol.FechaPublicacion,
 			&sol.Estado,
+			&sol.EsPremium,
 		); err != nil {
 			return nil, err
 		}
 		result = append(result, sol)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return result, nil
 }
 
 // Lista las solicitudes de un contratante junto con las postulaciones recibidas
+// 👉 Ahora: postulaciones de mentores Premium primero
 func (s *SolicitudService) ListSolicitudesByContratante(
 	ctx context.Context,
 	idContratante int,
@@ -138,6 +162,8 @@ func (s *SolicitudService) ListSolicitudesByContratante(
 	}
 	defer rows.Close()
 
+	const premiumPlanID = 2 // 👈 tu Premium es id_plan 2
+
 	var result []SolicitudWithPostulaciones
 
 	for rows.Next() {
@@ -153,13 +179,29 @@ func (s *SolicitudService) ListSolicitudesByContratante(
 			return nil, err
 		}
 
-		// 2) Para cada solicitud, traemos las postulaciones + persona
+		// 2) Para cada solicitud, traemos las postulaciones + persona + si el mentor es Premium + si ya fue contratada
 		postRows, err := s.db.Query(ctx, `
-            SELECT p.id_postulacion, p.id_persona, pe.nombre, pe.apellido, pe.email
+            SELECT 
+                p.id_postulacion, 
+                p.id_persona, 
+                pe.nombre, 
+                pe.apellido, 
+                pe.email,
+                COALESCE(CASE 
+                    WHEN sus.id_plan >= $2 THEN true
+                    ELSE false
+                END, false) AS es_premium,
+                CASE 
+                    WHEN c.id_contratacion IS NOT NULL THEN true
+                    ELSE false
+                END AS contratado
             FROM tb_postulacion p
             JOIN tb_persona pe ON pe.id_persona = p.id_persona
+            LEFT JOIN tb_suscripcion sus ON sus.id_persona = p.id_persona
+            LEFT JOIN tb_contratacion c ON c.id_postulacion = p.id_postulacion
             WHERE p.id_solicitud = $1
-        `, sol.IDSolicitud)
+            ORDER BY es_premium DESC, p.id_postulacion DESC
+        `, sol.IDSolicitud, premiumPlanID)
 		if err != nil {
 			return nil, fmt.Errorf("error al listar postulaciones: %w", err)
 		}
@@ -174,6 +216,8 @@ func (s *SolicitudService) ListSolicitudesByContratante(
 				&nombre,
 				&apellido,
 				&post.MentorEmail,
+				&post.EsPremium,
+				&post.Contratado, // 👈 NUEVO
 			); err != nil {
 				postRows.Close()
 				return nil, err
@@ -187,5 +231,25 @@ func (s *SolicitudService) ListSolicitudesByContratante(
 		result = append(result, sol)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return result, nil
+}
+
+// CountSolicitudesActivas cuenta cuántas solicitudes/anuncios activos tiene una persona
+// 🔧 FIX: usar id_contratante y estado='abierta'
+func (s *SolicitudService) CountSolicitudesActivas(ctx context.Context, idPersona int) (int, error) {
+	var count int
+	err := s.db.QueryRow(ctx, `
+        SELECT COUNT(*)
+        FROM tb_solicitud
+        WHERE id_contratante = $1
+          AND estado = 'abierta'
+    `, idPersona).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }

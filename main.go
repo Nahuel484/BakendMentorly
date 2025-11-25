@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
@@ -35,7 +36,16 @@ func main() {
 		log.Fatal("Error: JWT_SECRET no está configurada")
 	}
 
-	pool, err := pgxpool.New(context.Background(), databaseURL)
+	// Crear configuración del pool
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		log.Fatalf("Error al parsear DATABASE_URL: %v", err)
+	}
+
+	// 👉 Usar siempre Simple Protocol (sin prepared statements)
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
 		log.Fatalf("Error al crear pool de conexiones: %v", err)
 	}
@@ -50,7 +60,8 @@ func main() {
 	fmt.Println("✓ Conexión a base de datos exitosa")
 
 	// Inicializar Handlers
-	authHandler := handlers.NewAuthHandler(pool)
+	suscripcionService := services.NewSuscripcionService(pool)
+	authHandler := handlers.NewAuthHandler(pool, suscripcionService)
 	oauthHandler := handlers.NewOAuthHandler(pool)
 	sessionHandler := handlers.NewSessionHandler(pool)
 	skillHandler := handlers.NewSkillHandler(pool)
@@ -59,15 +70,15 @@ func main() {
 	notificationHandler := handlers.NewNotificationHandler(pool)
 	profileHandler := handlers.NewProfileHandler(pool)
 	solicitudService := services.NewSolicitudService(pool)
-	solicitudHandler := handlers.NewSolicitudHandler(solicitudService)
+	solicitudHandler := handlers.NewSolicitudHandler(solicitudService, suscripcionService)
 
 	postulacionService := services.NewPostulacionService(pool, notificationService)
-	postulacionHandler := handlers.NewPostulacionHandler(postulacionService)
+	postulacionHandler := handlers.NewPostulacionHandler(postulacionService, suscripcionService)
 
-	contratacionService := services.NewContratacionService(pool)
+	contratacionService := services.NewContratacionService(pool, notificationService)
 	contratacionHandler := handlers.NewContratacionHandler(contratacionService)
 
-	messageService := services.NewMessageService(pool)
+	messageService := services.NewMessageService(pool, notificationService)
 	messageHandler := handlers.NewMessageHandler(messageService)
 
 	// 🔹 Planes (para frontend + pagos)
@@ -75,7 +86,10 @@ func main() {
 	planHandler := handlers.NewPlanHandler(planService)
 
 	mpService := services.NewMercadoPagoService()
-	paymentHandler := handlers.NewPaymentHandler(planService, mpService)
+
+	mpWebhook := handlers.NewMPWebhookHandler(mpService, suscripcionService)
+	suscripcionHandler := handlers.NewSuscripcionHandler(suscripcionService, planService)
+	paymentHandler := handlers.NewPaymentHandler(planService, mpService, suscripcionService)
 	// Inicializar Gin
 	router := gin.Default()
 
@@ -117,6 +131,7 @@ func main() {
 
 	api.GET("/planes", planHandler.GetActivePlans)
 	api.GET("/planes/:id", planHandler.GetPlanByID)
+	api.POST("/payments/webhook", mpWebhook.HandleWebhook)
 
 	// ============================================================
 	// RUTAS PROTEGIDAS - USUARIO
@@ -135,7 +150,7 @@ func main() {
 
 		// Suscripción
 		userRoutes.POST("/subscribe/:plan_id", authHandler.SubscribeToPlanHandler)
-
+		userRoutes.GET("/subscriptions/me", suscripcionHandler.GetMySubscription)
 		// Sesiones
 		userRoutes.POST("/logout", sessionHandler.LogoutHandler)
 		userRoutes.POST("/logout-all", sessionHandler.LogoutAllHandler)
@@ -178,6 +193,9 @@ func main() {
 
 		// Mensajes
 		secured.POST("/messages", messageHandler.SendMessage)
+		secured.GET("/conversaciones/mias", messageHandler.ListMisConversaciones)            // listar chats del usuario
+		secured.GET("/conversaciones/:id/mensajes", messageHandler.ListMensajesConversacion) // mensajes de un chat
+		secured.POST("/conversaciones/:id/cerrar", messageHandler.CerrarConversacion)        // cerrar chat
 	}
 
 	// ============================================================

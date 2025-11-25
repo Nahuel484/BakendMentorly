@@ -13,12 +13,14 @@ type MercadoPagoService struct {
 	accessToken string
 	frontendURL string
 	client      *http.Client
+	webhookURL  string
 }
 
 func NewMercadoPagoService() *MercadoPagoService {
 	return &MercadoPagoService{
 		accessToken: os.Getenv("MP_ACCESS_TOKEN"),
 		frontendURL: os.Getenv("FRONTEND_URL"),
+		webhookURL:  os.Getenv("MP_WEBHOOK_URL"),
 		client:      &http.Client{},
 	}
 }
@@ -31,10 +33,11 @@ type mpItem struct {
 }
 
 type mpPreferenceRequest struct {
-	Items      []mpItem          `json:"items"`
-	BackURLs   map[string]string `json:"back_urls"`
-	AutoReturn string            `json:"auto_return"`
-	Metadata   map[string]any    `json:"metadata"`
+	Items           []mpItem          `json:"items"`
+	BackURLs        map[string]string `json:"back_urls"`
+	AutoReturn      string            `json:"auto_return"`
+	NotificationURL string            `json:"notification_url,omitempty"`
+	Metadata        map[string]any    `json:"metadata"`
 }
 
 type mpPreferenceResponse struct {
@@ -56,7 +59,8 @@ func (m *MercadoPagoService) CreatePreference(ctx context.Context, title string,
 			"failure": m.frontendURL + "/pago/failure",
 			"pending": m.frontendURL + "/pago/pending",
 		},
-		AutoReturn: "approved",
+		AutoReturn:      "approved",
+		NotificationURL: m.webhookURL,
 		Metadata: map[string]any{
 			"user_id": userID,
 			"plan_id": planID,
@@ -95,4 +99,38 @@ func (m *MercadoPagoService) CreatePreference(ctx context.Context, title string,
 	}
 
 	return mpResp.InitPoint, nil
+}
+
+type PaymentInfo struct {
+	Status   string
+	Metadata map[string]interface{}
+}
+
+func (m *MercadoPagoService) GetPaymentInfo(paymentID int) (*PaymentInfo, error) {
+	req, err := http.NewRequest(
+		"GET",
+		fmt.Sprintf("https://api.mercadopago.com/v1/payments/%d", paymentID),
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+m.accessToken)
+
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var data map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
+	}
+
+	return &PaymentInfo{
+		Status:   data["status"].(string),
+		Metadata: data["metadata"].(map[string]interface{}),
+	}, nil
 }

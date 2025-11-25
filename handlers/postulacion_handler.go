@@ -10,10 +10,17 @@ import (
 
 type PostulacionHandler struct {
 	postulacionService *services.PostulacionService
+	suscripcionService *services.SuscripcionService
 }
 
-func NewPostulacionHandler(s *services.PostulacionService) *PostulacionHandler {
-	return &PostulacionHandler{postulacionService: s}
+func NewPostulacionHandler(
+	s *services.PostulacionService,
+	ss *services.SuscripcionService,
+) *PostulacionHandler {
+	return &PostulacionHandler{
+		postulacionService: s,
+		suscripcionService: ss,
+	}
 }
 
 type createPostulacionRequest struct {
@@ -35,6 +42,7 @@ func (h *PostulacionHandler) CreatePostulacion(c *gin.Context) {
 		return
 	}
 	idPersona := idPersonaInterface.(int)
+	ctx := c.Request.Context()
 
 	var req createPostulacionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -46,7 +54,43 @@ func (h *PostulacionHandler) CreatePostulacion(c *gin.Context) {
 		return
 	}
 
-	post, _, err := h.postulacionService.CreatePostulacion(c.Request.Context(), idPersona, req.IDSolicitud)
+	// 🔹 1) Obtener suscripción activa (o asumir Gratis si no tiene)
+	sub, err := h.suscripcionService.GetActiveByPersona(ctx, idPersona)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ResponseData{
+			Success: false,
+			Message: "Error consultando suscripción",
+		})
+		return
+	}
+
+	planID := services.DefaultFreePlanID
+	if sub != nil {
+		planID = sub.IDPlan
+	}
+	limits := services.GetPlanLimitsByID(planID)
+
+	// 🔹 2) Contar postulaciones del mes actual
+	count, err := h.postulacionService.CountPostulacionesMes(ctx, idPersona)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ResponseData{
+			Success: false,
+			Message: "Error consultando postulaciones existentes",
+			Data:    err.Error(),
+		})
+		return
+	}
+
+	if count >= limits.MaxPostulacionesMentor {
+		c.JSON(http.StatusForbidden, ResponseData{
+			Success: false,
+			Message: "Has alcanzado el máximo de postulaciones para tu plan. Mejora tu suscripción para seguir postulando.",
+		})
+		return
+	}
+
+	// 🔹 3) Crear la postulación normalmente
+	post, _, err := h.postulacionService.CreatePostulacion(ctx, idPersona, req.IDSolicitud)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ResponseData{
 			Success: false,
