@@ -5,6 +5,7 @@ import (
 	"errors"
 	"mentorly-backend/services"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -160,5 +161,43 @@ func (h *ProfileHandler) ListUsersByRoleHandler(c *gin.Context) {
 		Success: true,
 		Message: "Usuarios obtenidos",
 		Data:    users,
+	})
+}
+
+// GET /api/user/public/:id
+func (h *ProfileHandler) GetPublicProfileHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	if idStr == "" {
+		c.JSON(http.StatusBadRequest, ResponseData{
+			Success: false,
+			Message: "ID de usuario no proporcionado",
+		})
+		return
+	}
+
+	idPersona, err := strconv.Atoi(idStr)
+	if err != nil || idPersona <= 0 {
+		c.JSON(http.StatusBadRequest, ResponseData{
+			Success: false,
+			Message: "ID de usuario inválido",
+		})
+		return
+	}
+
+	profile, err := h.userService.GetUserProfile(c.Request.Context(), idPersona)
+	if err != nil {
+		// Podés chequear ErrUserNotFound si querés
+		c.JSON(http.StatusNotFound, ResponseData{
+			Success: false,
+			Message: "Usuario no encontrado",
+			Data:    err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, ResponseData{
+		Success: true,
+		Message: "Perfil público obtenido",
+		Data:    profile,
 	})
 }

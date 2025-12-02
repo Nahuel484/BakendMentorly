@@ -253,3 +253,47 @@ func (s *SolicitudService) CountSolicitudesActivas(ctx context.Context, idPerson
 	}
 	return count, nil
 }
+
+// DeleteSolicitud marca una solicitud como eliminada.
+// No deja eliminar si todavía hay postulaciones sin contratar.
+func (s *SolicitudService) DeleteSolicitud(
+	ctx context.Context,
+	idSolicitud int,
+	idContratante int,
+) error {
+	// 1) Verificar si hay postulaciones PENDIENTES
+	// (postulaciones de esa solicitud que no tienen contratación asociada)
+	var pendientes int
+	err := s.db.QueryRow(ctx, `
+        SELECT COUNT(*)
+        FROM tb_postulacion p
+        LEFT JOIN tb_contratacion c
+               ON c.id_postulacion = p.id_postulacion
+        WHERE p.id_solicitud = $1
+          AND c.id_contratacion IS NULL
+    `, idSolicitud).Scan(&pendientes)
+	if err != nil {
+		return fmt.Errorf("error verificando postulaciones pendientes: %w", err)
+	}
+
+	if pendientes > 0 {
+		return fmt.Errorf("no se puede eliminar la solicitud porque aún tiene postulaciones sin contratar")
+	}
+
+	// 2) Soft delete: marcar como eliminada, validando que sea del contratante
+	res, err := s.db.Exec(ctx, `
+        UPDATE tb_solicitud
+        SET estado = 'eliminada'
+        WHERE id_solicitud   = $1
+          AND id_contratante = $2
+    `, idSolicitud, idContratante)
+	if err != nil {
+		return fmt.Errorf("no se pudo eliminar la solicitud: %w", err)
+	}
+
+	if res.RowsAffected() == 0 {
+		return fmt.Errorf("no se encontró la solicitud o no sos el dueño")
+	}
+
+	return nil
+}

@@ -33,13 +33,28 @@ func (s *PostulacionService) CreatePostulacion(
 	idSolicitud int,
 ) (*Postulacion, int, error) {
 
-	// Obtener contratante y título de la solicitud
+	// 0) Verificar que NO exista ya una postulación del mentor a esa solicitud
+	var existe int
+	err := s.db.QueryRow(ctx, `
+        SELECT COUNT(*) 
+        FROM tb_postulacion
+        WHERE id_persona = $1 AND id_solicitud = $2
+    `, idPersona, idSolicitud).Scan(&existe)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error verificando postulaciones previas: %w", err)
+	}
+
+	if existe > 0 {
+		return nil, 0, fmt.Errorf("ya te postulaste a esta solicitud")
+	}
+
+	// 1) Obtener contratante y título de la solicitud
 	var (
 		idContratante   int
 		tituloSolicitud string
 	)
 
-	err := s.db.QueryRow(ctx, `
+	err = s.db.QueryRow(ctx, `
         SELECT id_contratante, titulo
         FROM tb_solicitud
         WHERE id_solicitud = $1
@@ -48,6 +63,7 @@ func (s *PostulacionService) CreatePostulacion(
 		return nil, 0, fmt.Errorf("no se encontró la solicitud: %w", err)
 	}
 
+	// 2) Crear postulación
 	var post Postulacion
 
 	err = s.db.QueryRow(ctx, `
@@ -68,7 +84,7 @@ func (s *PostulacionService) CreatePostulacion(
 		return nil, 0, fmt.Errorf("no se pudo crear la postulación: %w", err)
 	}
 
-	// Notificación al contratante (web + email)
+	// 3) Notificación al contratante (web + email)
 	if s.notificationService != nil {
 		_, err = s.notificationService.CreateNotification(ctx, NotificationRequest{
 			IDPersona:   idContratante,

@@ -95,7 +95,7 @@ func main() {
 
 	// Configurar CORS
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000", "https://mentorly-web.vercel.app", "http://localhost:5174"},
+		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000", "https://mentorly-web.vercel.app", "http://localhost:5174, http://127.0.0.1:11463"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -142,7 +142,7 @@ func main() {
 		// Perfil
 		userRoutes.GET("/profile", profileHandler.GetProfileHandler)
 		userRoutes.PUT("/profile", profileHandler.UpdateProfileHandler)
-
+		userRoutes.GET("/public/:id", profileHandler.GetPublicProfileHandler)
 		//Explore
 		userRoutes.GET("/explore", profileHandler.ListUsersByRoleHandler)
 		// Rol
@@ -182,6 +182,8 @@ func main() {
 		secured.POST("/solicitudes", solicitudHandler.CreateSolicitud)
 		secured.GET("/solicitudes/explore", solicitudHandler.ListSolicitudesAbiertas)
 		secured.GET("/solicitudes/mias", solicitudHandler.ListMisSolicitudes)
+		secured.DELETE("/solicitudes/:id", solicitudHandler.DeleteSolicitud)
+
 		// Postulaciones
 		secured.POST("/postulaciones", postulacionHandler.CreatePostulacion)
 		secured.POST("/postulaciones/rechazar", postulacionHandler.RejectPostulacion)

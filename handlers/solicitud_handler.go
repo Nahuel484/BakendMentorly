@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"mentorly-backend/services"
 
@@ -153,5 +154,41 @@ func (h *SolicitudHandler) ListMisSolicitudes(c *gin.Context) {
 		Success: true,
 		Message: "Solicitudes del usuario",
 		Data:    solicitudes,
+	})
+}
+
+// DELETE /api/solicitudes/:id
+func (h *SolicitudHandler) DeleteSolicitud(c *gin.Context) {
+	idPersonaInterface, exists := c.Get("id_persona")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ResponseData{
+			Success: false,
+			Message: "Usuario no autenticado",
+		})
+		return
+	}
+	idContratante := idPersonaInterface.(int)
+
+	idStr := c.Param("id")
+	idSolicitud, err := strconv.Atoi(idStr)
+	if err != nil || idSolicitud <= 0 {
+		c.JSON(http.StatusBadRequest, ResponseData{
+			Success: false,
+			Message: "ID de solicitud inválido",
+		})
+		return
+	}
+
+	if err := h.solicitudService.DeleteSolicitud(c.Request.Context(), idSolicitud, idContratante); err != nil {
+		c.JSON(http.StatusBadRequest, ResponseData{
+			Success: false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, ResponseData{
+		Success: true,
+		Message: "Solicitud eliminada correctamente",
 	})
 }
